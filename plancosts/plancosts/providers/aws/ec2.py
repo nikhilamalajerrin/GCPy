@@ -54,3 +54,6 @@ ec2_instance = ResourceMapping(
         "ebs_block_device": block_device
     }
 )
+
+# Alias to match Go's naming style
+Ec2Instance = ec2_instance

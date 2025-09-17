@@ -101,15 +101,6 @@ def get_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown
         Exception: If any pricing API call fails
     """
     cost_breakdowns = []
-    
     for resource in resources:
-        try:
-            breakdown = get_cost_breakdown(resource)
-            cost_breakdowns.append(breakdown)
-        except Exception as e:
-            # Log error but continue processing other resources
-            print(f"Error calculating cost for resource {resource.address()}: {e}")
-            # You might want to handle this differently based on requirements
-            raise
-    
+        cost_breakdowns.append(get_cost_breakdown(resource))
     return cost_breakdowns
