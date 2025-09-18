@@ -1,0 +1,3 @@
+*.pyc
+./plancosts/plancosts/__pycache__
+./plancosts/__pycache__
