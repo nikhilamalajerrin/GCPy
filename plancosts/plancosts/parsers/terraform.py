@@ -23,6 +23,12 @@ def get_resource_mapping(resource_type: str):
     if resource_type == "aws_ebs_volume":
         from plancosts.providers.aws import ebs as aws_ebs
         return aws_ebs.EbsVolume
+    if resource_type == "aws_ebs_snapshot":
+        from plancosts.providers.aws import ebs as aws_ebs
+        return aws_ebs.EbsSnapshot
+    if resource_type == "aws_ebs_snapshot_copy":
+        from plancosts.providers.aws import ebs as aws_ebs
+        return aws_ebs.EbsSnapshotCopy
     return None
 
 
@@ -71,15 +77,25 @@ def parse_plan_file(file_path: str) -> List[Resource]:
 
 
 def _add_references(resource: Resource, resource_config: Dict[str, Any], resource_map: Dict[str, Resource]) -> None:
+    """
+    Wire references for a single resource.
+    CHANGED: key the reference map by the EXPRESSION NAME (e.g., "volume_id"),
+    while still resolving the referenced resource by its Terraform address.
+    """
     expressions = resource_config.get("expressions", {})
     if not isinstance(expressions, dict):
         return
-    for value in expressions.values():
+
+    for key, value in expressions.items():
         ref_addr = None
+
+        # Direct references
         if isinstance(value, dict) and "references" in value:
             refs = value.get("references") or []
             if refs:
                 ref_addr = refs[0]
+
+        # Array form: value[0].id.references
         elif isinstance(value, list) and value:
             first_item = value[0]
             if isinstance(first_item, dict):
@@ -88,5 +104,7 @@ def _add_references(resource: Resource, resource_config: Dict[str, Any], resourc
                     refs = id_val.get("references") or []
                     if refs:
                         ref_addr = refs[0]
+
         if ref_addr and ref_addr in resource_map:
-            resource.add_reference(ref_addr, resource_map[ref_addr])
+            # Go: r.AddReferences(key.String(), resource)
+            resource.add_reference(str(key), resource_map[ref_addr])

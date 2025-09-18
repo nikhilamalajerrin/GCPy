@@ -25,7 +25,7 @@ class PriceComponent(ABC):
 class BasePriceComponent(PriceComponent):
     def __init__(self, name: str, resource, price_mapping: PriceMapping):
         self._name = name
-        self._resource = resource
+        self._resource = resource  # keeps full access incl. .raw_values() and .references()
         self._price_mapping = price_mapping
 
     def name(self) -> str:
@@ -41,8 +41,9 @@ class BasePriceComponent(PriceComponent):
         return merge_filters(self._resource.get_filters(), mapping_filters)
 
     def calculate_hourly_cost(self, price: Decimal) -> Decimal:
+        # CHANGED: mapping.calculate_cost now expects (price, resource)
         if getattr(self._price_mapping, "calculate_cost", None):
-            cost = self._price_mapping.calculate_cost(price, self._resource.raw_values())
+            cost = self._price_mapping.calculate_cost(price, self._resource)
         else:
             cost = price
 

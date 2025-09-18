@@ -3,9 +3,13 @@ Mappings between Terraform resources and pricing components.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from decimal import Decimal
 from .filters import Filter, merge_filters
+
+# Avoid runtime import cycle: only import Resource for type-checkers
+if TYPE_CHECKING:
+    from .resource import Resource
 
 
 class ValueMapping:
@@ -27,8 +31,8 @@ class PriceMapping:
         default_filters: Optional[List[Filter]] = None,
         value_mappings: Optional[List[ValueMapping]] = None,
         should_skip: Optional[Callable[[Dict[str, Any]], bool]] = None,
-        # UPDATED: takes (price, values)
-        calculate_cost: Optional[Callable[[Decimal, Dict[str, Any]], Decimal]] = None,
+        # type-only forward ref to avoid import cycle
+        calculate_cost: Optional[Callable[[Decimal, "Resource"], Decimal]] = None,
     ):
         self.time_unit = time_unit
         self.default_filters = default_filters or []
