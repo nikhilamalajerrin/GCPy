@@ -1,33 +1,38 @@
-#!/usr/bin/env python3
-"""Mock pricing server for testing."""
-from flask import Flask, request, jsonify
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 
-app = Flask(__name__)
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        try:
+            queries = json.loads(body.decode("utf-8"))
+            if not isinstance(queries, list):
+                queries = [queries]
+        except Exception:
+            queries = []
 
-@app.route('/', methods=['POST'])
-def pricing_api():
-    """Mock pricing API endpoint."""
-    queries = request.json
-    results = []
-    
-    for query in queries:
-        # Return mock pricing data
-        results.append({
-            "data": {
-                "products": [{
-                    "onDemandPricing": [{
-                        "priceDimensions": [{
-                            "unit": "Hrs",
-                            "pricePerUnit": {
-                                "USD": "0.0416"  # Mock price for m5.large
-                            }
+        # Return one result per query, each with a USD price.
+        # Use a deterministic price so it’s easy to eyeball (e.g. 0.0100, 0.0200, ...).
+        results = []
+        for i, _ in enumerate(queries, start=1):
+            results.append({
+                "data": {
+                    "products": [{
+                        "onDemandPricing": [{
+                            "priceDimensions": [{
+                                "pricePerUnit": {"USD": f"{i/100:.4f}"}
+                            }]
                         }]
                     }]
-                }]
-            }
-        })
-    
-    return jsonify(results)
+                }
+            })
 
-if __name__ == '__main__':
-    app.run(port=4000)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(results).encode("utf-8"))
+
+if __name__ == "__main__":
+    print("Mock price API on http://localhost:4000/graphql")
+    HTTPServer(("127.0.0.1", 4000), Handler).serve_forever()
