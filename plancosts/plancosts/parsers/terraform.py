@@ -1,12 +1,18 @@
 """
 Terraform plan parser that builds typed AWS Terraform resources.
 
-This version constructs resources from plancosts.providers.aws_terraform.*
-and wires up references between them (e.g. ASG -> Launch Template).
+Adds helpers to load/generate plan JSON like the Go commit:
+- load_plan_json(path)
+- generate_plan_json(tfpath, plan_path)
+- parse_plan_json(plan_json)
 """
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import subprocess
+import logging
 from typing import Dict, Any, List, Optional
 
 from plancosts.base.resource import Resource  # type: ignore
@@ -21,6 +27,51 @@ from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTempl
 from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
 
 
+# ---------------- Terraform execution helpers ----------------
+
+def _run_tf(tfdir: str, *args: str) -> bytes:
+    cmd = ["terraform", *args]
+    logging.info("Running: %s", " ".join(cmd))
+    proc = subprocess.run(cmd, cwd=tfdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Terraform command failed ({' '.join(cmd)}):\n{stderr}")
+    return proc.stdout
+
+
+def load_plan_json(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def generate_plan_json(tfpath: str | None, plan_path: str | None) -> bytes:
+    if not tfpath:
+        raise ValueError("--tfpath is required when generating plan JSON")
+
+    # If no plan_path: init + plan to a temp file
+    if not plan_path:
+        _ = _run_tf(tfpath, "init", "-input=false", "-lock=false")
+        with tempfile.NamedTemporaryFile(prefix="tfplan-", delete=False) as tmp:
+            tmp_plan = tmp.name
+        try:
+            _ = _run_tf(
+                tfpath, "plan",
+                "-input=false", "-lock=false",
+                f"-out={tmp_plan}"
+            )
+            out = _run_tf(tfpath, "show", "-json", tmp_plan)
+        finally:
+            try:
+                os.remove(tmp_plan)
+            except OSError:
+                pass
+        return out
+
+    # If a binary plan is provided, just show -json it
+    return _run_tf(tfpath, "show", "-json", plan_path)
+
+
+# ---------------- JSON parsing into Resources ----------------
 
 def _aws_region(plan_data: Dict[str, Any]) -> str:
     return (
@@ -34,15 +85,8 @@ def _aws_region(plan_data: Dict[str, Any]) -> str:
 
 
 def _create_resource(
-    rtype: str,
-    address: str,
-    raw_values: Dict[str, Any],
-    aws_region: str,
+    rtype: str, address: str, raw_values: Dict[str, Any], aws_region: str
 ) -> Optional[Resource]:
-    """
-    Factory: create the correct typed resource for the given terraform resource type.
-    Unknown types return None (ignored).
-    """
     if rtype == "aws_instance":
         return Ec2Instance(address, aws_region, raw_values)
     if rtype == "aws_ebs_volume":
@@ -57,17 +101,11 @@ def _create_resource(
         return Ec2LaunchTemplate(address, aws_region, raw_values)
     if rtype == "aws_autoscaling_group":
         return Ec2AutoscalingGroup(address, aws_region, raw_values)
-    return None  # unsupported -> skip
+    return None
 
 
-def parse_plan_file(file_path: str) -> List[Resource]:
-    """
-    Parse a Terraform plan JSON file and build a list of typed resources.
-    Also wires up cross-resource references from configuration.expressions.
-    """
-    with open(file_path, "r") as f:
-        plan = json.load(f)
-
+def parse_plan_json(plan_json: bytes) -> List[Resource]:
+    plan = json.loads(plan_json.decode("utf-8"))
     region = _aws_region(plan)
 
     # 1) Build resources map from planned_values
@@ -98,8 +136,12 @@ def parse_plan_file(file_path: str) -> List[Resource]:
         cfg = cfg_index.get(address) or {}
         _add_references(resource, cfg, resource_map)
 
-    # Done — typed resources already build their subresources in their constructors
-    return list(resource_map.values())
+    return [resource_map[k] for k in sorted(resource_map.keys())]
+
+
+def parse_plan_file(file_path: str) -> List[Resource]:
+    """Backward-compatible: read a plan JSON file from disk and parse."""
+    return parse_plan_json(load_plan_json(file_path))
 
 
 def _add_references(
@@ -107,13 +149,6 @@ def _add_references(
     resource_config: Dict[str, Any],
     resource_map: Dict[str, Resource],
 ) -> None:
-    """
-    Add references based on configuration.expressions.
-    We look for:
-      - direct: expressions.<key>.references[0]
-      - id form: expressions.<key>[0].id.references[0]
-    The reference key in the config becomes the reference name on the resource.
-    """
     expressions = resource_config.get("expressions", {})
     if not isinstance(expressions, dict):
         return
@@ -138,6 +173,4 @@ def _add_references(
                         ref_addr = refs[0]
 
         if ref_addr and ref_addr in resource_map:
-            # IMPORTANT: name the reference by the expression key
-            # (e.g., "launch_template", "launch_configuration", "volume_id", etc.)
             resource.add_reference(key, resource_map[ref_addr])
