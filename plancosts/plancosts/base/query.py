@@ -14,16 +14,9 @@ import urllib.error
 
 from plancosts.base.filters import Filter
 from plancosts.base.resource import Resource, PriceComponent
+from plancosts.config import PRICE_LIST_API_ENDPOINT  # NEW
 
-# Prefer config module if present; fall back to env var
-_API_URL: str
-try:
-    from plancosts.config import CONFIG  # optional module
-    _API_URL = getattr(CONFIG, "price_list_api_endpoint", None) or os.getenv(
-        "PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "http://localhost:4000/graphql"
-    )
-except Exception:
-    _API_URL = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "http://localhost:4000/graphql")
+_API_URL = PRICE_LIST_API_ENDPOINT  # was: os.getenv("PLANCOSTS_API_URL", "http://127.0.0.1:4000/")
 
 
 def build_query(filters: List[Filter]) -> Dict[str, Any]:

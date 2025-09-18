@@ -1,26 +1,32 @@
-# plancosts/config.py
+# plancosts/config/config.py
 from __future__ import annotations
 import os
-from dataclasses import dataclass
+import logging
 
-# Optional: load .env files if present
 try:
-    from dotenv import load_dotenv
-    # load .env.local first (can override by .env)
-    load_dotenv(".env.local", override=True)
-    load_dotenv(override=False)
-except Exception:
-    # python-dotenv is optional; env vars still work without it
-    pass
+    from dotenv import load_dotenv  # pip install python-dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None
 
+log = logging.getLogger(__name__)
 
-@dataclass(frozen=True)
-class Config:
-    price_list_api_endpoint: str = os.getenv(
-        "PLAN_COSTS_PRICE_LIST_API_ENDPOINT",
-        "http://localhost:4000/graphql",
-    )
+def _safe_load_env(path: str) -> None:
+    """Load a dotenv file if it exists; never raise if it doesn't."""
+    if not load_dotenv:
+        return
+    if os.path.isfile(path):
+        try:
+            # Keep existing env values; only fill missing ones
+            load_dotenv(path, override=False)
+        except Exception as e:  # mirror Go code’s “log.Fatal” semantics with a warning
+            log.warning("Failed to load %s: %s", path, e)
 
+# Load .env.local then .env (if they exist)
+_safe_load_env(".env.local")
+_safe_load_env(".env")
 
-# single shared config instance
-CONFIG = Config()
+# Public config values (with sane defaults)
+PRICE_LIST_API_ENDPOINT = os.getenv(
+    "PLAN_COSTS_PRICE_LIST_API_ENDPOINT",
+    "http://localhost:4000/graphql",
+)
