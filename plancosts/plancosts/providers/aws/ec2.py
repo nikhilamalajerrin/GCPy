@@ -1,34 +1,41 @@
 """
 AWS EC2 instance pricing mappings.
+Mirrors Go changes:
+- Ec2BlockDeviceGB/IOPS inherit TimeUnit, DefaultFilters, CalculateCost from EBS mappings
+- SubResourceMappings point to Ec2BlockDevice
 """
+from __future__ import annotations
+
 from plancosts.base.filters import Filter
 from plancosts.base.mappings import PriceMapping, ResourceMapping, ValueMapping
+from . import ebs as aws_ebs
 
 
-# Block device mappings
-block_device_gb = PriceMapping(
-    time_unit="hour",
+Ec2BlockDeviceGB = PriceMapping(
+    time_unit=aws_ebs.EbsVolumeGB.time_unit,
+    default_filters=list(aws_ebs.EbsVolumeGB.default_filters),
+    calculate_cost=aws_ebs.EbsVolumeGB.calculate_cost,
     value_mappings=[
-        ValueMapping(from_key="volume_type", to_key="volumeApiName")
-    ]
-)
-
-block_device_iops = PriceMapping(
-    time_unit="hour",
-    value_mappings=[
-        ValueMapping(from_key="volume_type", to_key="volumeApiName")
+        ValueMapping(from_key="volume_type", to_key="volumeApiName"),
     ],
-    should_skip=lambda values: values.get("volume_type") != "io1"
 )
 
-block_device = ResourceMapping(
+Ec2BlockDeviceIOPS = PriceMapping(
+    time_unit=aws_ebs.EbsVolumeIOPS.time_unit,
+    default_filters=list(aws_ebs.EbsVolumeIOPS.default_filters),
+    calculate_cost=aws_ebs.EbsVolumeIOPS.calculate_cost,
+    value_mappings=[
+        ValueMapping(from_key="volume_type", to_key="volumeApiName"),
+    ],
+)
+
+Ec2BlockDevice = ResourceMapping(
     price_mappings={
-        "GB": block_device_gb,
-        "IOPS": block_device_iops
+        "GB": Ec2BlockDeviceGB,
+        "IOPS": Ec2BlockDeviceIOPS,
     }
 )
 
-# EC2 instance mappings
 ec2_instance_hours = PriceMapping(
     time_unit="hour",
     default_filters=[
@@ -37,23 +44,20 @@ ec2_instance_hours = PriceMapping(
         Filter(key="operatingSystem", value="Linux"),
         Filter(key="preInstalledSw", value="NA"),
         Filter(key="capacitystatus", value="Used"),
-        Filter(key="tenancy", value="Shared")
+        Filter(key="tenancy", value="Shared"),
     ],
     value_mappings=[
         ValueMapping(from_key="instance_type", to_key="instanceType"),
-        ValueMapping(from_key="tenancy", to_key="tenancy")
-    ]
+        ValueMapping(from_key="tenancy", to_key="tenancy"),
+    ],
 )
 
-ec2_instance = ResourceMapping(
+Ec2Instance = ResourceMapping(
     price_mappings={
-        "Instance hours": ec2_instance_hours
+        "Instance hours": ec2_instance_hours,
     },
     sub_resource_mappings={
-        "root_block_device": block_device,
-        "ebs_block_device": block_device
-    }
+        "root_block_device": Ec2BlockDevice,
+        "ebs_block_device": Ec2BlockDevice,
+    },
 )
-
-# Alias to match Go's naming style
-Ec2Instance = ec2_instance

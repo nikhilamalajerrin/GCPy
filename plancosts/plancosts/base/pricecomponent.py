@@ -1,82 +1,57 @@
 """
 Price component abstraction for cost calculations.
 """
-from typing import List, Optional
-from decimal import Decimal
+from __future__ import annotations
+
+from typing import List
+from decimal import Decimal, InvalidOperation
 from abc import ABC, abstractmethod
+
 from .filters import Filter, merge_filters
 from .mappings import PriceMapping
 
 
 class PriceComponent(ABC):
-    """Abstract base class for price components."""
-    
     @abstractmethod
-    def name(self) -> str:
-        """Get the name of this price component."""
-        pass
-    
+    def name(self) -> str: ...
     @abstractmethod
-    def should_skip(self) -> bool:
-        """Check if this component should be skipped."""
-        pass
-    
+    def should_skip(self) -> bool: ...
     @abstractmethod
-    def get_filters(self) -> List[Filter]:
-        """Get filters for pricing query."""
-        pass
-    
+    def get_filters(self) -> List[Filter]: ...
     @abstractmethod
-    def calculate_hourly_cost(self, price: Decimal) -> Decimal:
-        """Calculate hourly cost from the price."""
-        pass
+    def calculate_hourly_cost(self, price: Decimal) -> Decimal: ...
 
 
 class BasePriceComponent(PriceComponent):
-    """Base implementation of a price component."""
-    
     def __init__(self, name: str, resource, price_mapping: PriceMapping):
-        """
-        Initialize a price component.
-        Note: resource is not typed here to avoid circular import.
-        """
         self._name = name
         self._resource = resource
         self._price_mapping = price_mapping
-    
+
     def name(self) -> str:
         return self._name
-    
+
     def should_skip(self) -> bool:
-        """Check if this component should be skipped based on resource values."""
-        if self._price_mapping.should_skip:
-            return self._price_mapping.should_skip(self._resource.raw_values())
+        if getattr(self._price_mapping, "should_skip", None):
+            return bool(self._price_mapping.should_skip(self._resource.raw_values()))
         return False
-    
+
     def get_filters(self) -> List[Filter]:
-        """Merge resource and price mapping filters."""
-        return merge_filters(
-            self._resource.get_filters(),
-            self._price_mapping.get_filters(self._resource.raw_values())
-        )
-    
+        mapping_filters = self._price_mapping.get_filters(self._resource.raw_values())
+        return merge_filters(self._resource.get_filters(), mapping_filters)
+
     def calculate_hourly_cost(self, price: Decimal) -> Decimal:
-        """Calculate hourly cost, converting from the price's time unit if needed."""
-        # Apply custom calculation if provided
-        if self._price_mapping.calculate_cost:
-            cost = self._price_mapping.calculate_cost(price)
+        if getattr(self._price_mapping, "calculate_cost", None):
+            cost = self._price_mapping.calculate_cost(price, self._resource.raw_values())
         else:
             cost = price
-        
-        # Convert to hourly rate based on time unit
-        time_unit_seconds = {
-            "hour": 60 * 60,
-            "month": 60 * 60 * 730  # 730 hours per month
-        }
-        
-        time_unit_multiplier = Decimal(
-            time_unit_seconds["hour"] / time_unit_seconds[self._price_mapping.time_unit]
-        )
-        
-        hourly_cost = cost * time_unit_multiplier
-        return hourly_cost
+
+        time_unit_seconds = {"hour": 3600, "month": 3600 * 730}
+        unit = getattr(self._price_mapping, "time_unit", "hour") or "hour"
+        denom = time_unit_seconds.get(unit)
+        if not denom:
+            return cost
+        try:
+            return cost * (Decimal(time_unit_seconds["hour"]) / Decimal(denom))
+        except (InvalidOperation, ZeroDivisionError):
+            return cost

@@ -1,37 +1,67 @@
 {
-    "format_version": "0.1",
-    "terraform_version": "0.14.0",
-    "configuration": {
-      "provider_config": {
-        "aws": {
-          "expressions": {
-            "region": {
-              "constant_value": "us-east-1"
-            }
+  "format_version": "0.1",
+  "terraform_version": "0.14.0",
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "expressions": {
+          "region": {
+            "constant_value": "us-east-1"
           }
         }
-      },
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_instance.example",
-            "expressions": {}
-          }
-        ]
       }
     },
-    "planned_values": {
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_instance.example",
-            "type": "aws_instance",
-            "values": {
-              "instance_type": "m5.large",
-              "tenancy": "default"
-            }
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_instance.example",
+          "expressions": {}
+        },
+        {
+          "address": "aws_ebs_volume.data1",
+          "expressions": {}
+        }
+      ]
+    }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_instance.example",
+          "type": "aws_instance",
+          "values": {
+            "instance_type": "m5.large",
+            "tenancy": "default",
+
+            "root_block_device": {
+              "volume_type": "gp2",
+              "size": 100
+            },
+
+            "ebs_block_device": [
+              {
+                "volume_type": "io1",
+                "size": 50,
+                "iops": 3000
+              },
+              {
+                "volume_type": "gp2",
+                "size": 200
+              }
+            ]
           }
-        ]
-      }
+        },
+        {
+          "address": "aws_ebs_volume.data1",
+          "type": "aws_ebs_volume",
+          "values": {
+            "type": "io1",
+            "size": 200,
+            "iops": 4000
+          }
+        }
+      ]
     }
   }
+}
