@@ -1,45 +1,53 @@
-"""
-Filter & value-mapping helpers (refactored model).
-"""
+# plancosts/base/filters.py
 from __future__ import annotations
-from typing import List, Optional, Callable, Any, Dict
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
+# -----------------
+# Data structures
+# -----------------
 
+@dataclass(frozen=True)
 class Filter:
-    def __init__(self, key: str, value: str, operation: Optional[str] = None):
-        self.key = key
-        self.value = value
-        self.operation = operation
+    key: str
+    value: str
 
-    def as_tuple(self):
-        return (self.key, self.operation)
-
-
+@dataclass(frozen=True)
 class ValueMapping:
-    def __init__(self, from_key: str, to_key: str, to_value_fn: Optional[Callable[[Any], str]] = None):
-        self.from_key = from_key
-        self.to_key = to_key
-        self.to_value_fn = to_value_fn
+    from_key: str
+    to_key: str
+    map_func: Optional[Callable[[Any], str]] = None  # <— tests expect this name
 
     def mapped_value(self, from_val: Any) -> str:
-        if self.to_value_fn:
-            return self.to_value_fn(from_val)
-        return "" if from_val is None else f"{from_val}"
+        return self.map_func(from_val) if self.map_func else str(from_val)
 
+# -----------------
+# Helpers
+# -----------------
 
-def merge_filters(*filter_sets: List[Filter]) -> List[Filter]:
-    merged: Dict[tuple, Filter] = {}
-    for fs in filter_sets:
-        for f in fs or []:
-            merged[f.as_tuple()] = f
-    return list(merged.values())
+def merge_filters(*lists: Iterable[Filter]) -> List[Filter]:
+    """
+    Merge multiple lists of Filter. Later lists override earlier ones by key.
+    Order is stable by first appearance of a key.
+    """
+    order: List[str] = []
+    latest: Dict[str, str] = {}
 
+    for lst in lists:
+        for f in lst:
+            if f.key not in latest:
+                order.append(f.key)
+            latest[f.key] = f.value  # override with latest value
 
-def map_filters(value_mappings: List[ValueMapping], values: Dict[str, Any]) -> List[Filter]:
+    return [Filter(key=k, value=latest[k]) for k in order]
+
+def map_filters(value_mappings: Iterable[ValueMapping], values: Dict[str, Any]) -> List[Filter]:
+    """
+    Build Filter list from a dict of values according to given mappings.
+    Missing keys are skipped. If map_func is provided it is applied.
+    """
     out: List[Filter] = []
-    for vm in value_mappings or []:
+    for vm in value_mappings:
         if vm.from_key in values:
-            to_val = vm.mapped_value(values[vm.from_key])
-            if to_val:
-                out.append(Filter(key=vm.to_key, value=to_val))
+            out.append(Filter(key=vm.to_key, value=vm.mapped_value(values[vm.from_key])))
     return out
