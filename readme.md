@@ -122,4 +122,4 @@ A minimal `test_plan.json` is provided to verify the pipeline, including:
 
 ## License
 
-See the original project’s license if based on upstream. Otherwise, add your preferred license here.
+MIT License
