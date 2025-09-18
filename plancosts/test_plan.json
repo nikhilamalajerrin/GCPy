@@ -5,31 +5,47 @@
     "provider_config": {
       "aws": {
         "expressions": {
-          "region": { "constant_value": "us-east-1" }
+          "region": {
+            "constant_value": "us-east-1"
+          }
         }
       }
     },
     "root_module": {
       "resources": [
-        { "address": "aws_instance.example", "expressions": {} },
-        { "address": "aws_ebs_volume.data1", "expressions": {} },
-
-        { "address": "aws_launch_configuration.lc1", "expressions": {} },
         {
-          "address": "aws_autoscaling_group.asg_lc",
+          "address": "aws_instance.example",
+          "expressions": {}
+        },
+        {
+          "address": "aws_ebs_volume.data1",
+          "expressions": {}
+        },
+        {
+          "address": "aws_ebs_snapshot.snap1",
           "expressions": {
-            "launch_configuration": {
-              "references": ["aws_launch_configuration.lc1"]
+            "volume_id": {
+              "references": ["aws_ebs_volume.data1"]
             }
           }
         },
-
-        { "address": "aws_launch_template.lt1", "expressions": {} },
         {
-          "address": "aws_autoscaling_group.asg_lt",
+          "address": "aws_ebs_snapshot_copy.copy1",
           "expressions": {
-            "launch_template": {
-              "references": ["aws_launch_template.lt1"]
+            "source_snapshot_id": {
+              "references": ["aws_ebs_snapshot.snap1"]
+            }
+          }
+        },
+        {
+          "address": "aws_launch_configuration.lc1",
+          "expressions": {}
+        },
+        {
+          "address": "aws_autoscaling_group.asg1",
+          "expressions": {
+            "launch_configuration": {
+              "references": ["aws_launch_configuration.lc1"]
             }
           }
         }
@@ -45,20 +61,48 @@
           "values": {
             "instance_type": "m5.large",
             "tenancy": "default",
-            "root_block_device": { "volume_type": "gp2", "size": 100 },
+            "root_block_device": [
+              {
+                "volume_type": "gp2",
+                "volume_size": 100
+              }
+            ],
             "ebs_block_device": [
-              { "volume_type": "io1", "size": 50, "iops": 3000 },
-              { "volume_type": "gp2", "size": 200 }
+              {
+                "volume_type": "io1",
+                "volume_size": 50,
+                "iops": 3000
+              },
+              {
+                "volume_type": "gp2",
+                "volume_size": 200
+              }
             ]
           }
         },
         {
           "address": "aws_ebs_volume.data1",
           "type": "aws_ebs_volume",
-          "values": { "type": "io1", "size": 200, "iops": 4000 }
-          },
-
-       
+          "values": {
+            "type": "io1",
+            "size": 200,
+            "iops": 4000
+          }
+        },
+        {
+          "address": "aws_ebs_snapshot.snap1",
+          "type": "aws_ebs_snapshot",
+          "values": {
+            "volume_id": "aws_ebs_volume.data1"
+          }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.copy1",
+          "type": "aws_ebs_snapshot_copy",
+          "values": {
+            "source_snapshot_id": "aws_ebs_snapshot.snap1"
+          }
+        },
         {
           "address": "aws_launch_configuration.lc1",
           "type": "aws_launch_configuration",
@@ -67,48 +111,33 @@
             "placement_tenancy": "default",
             "block_device_mappings": [
               {
+                "device_name": "/dev/xvdb",
                 "ebs": [
-                  { "volume_type": "io1", "volume_size": 100, "iops": 3000 }
+                  {
+                    "volume_type": "io1",
+                    "volume_size": 150,
+                    "iops": 3000
+                  }
                 ]
               },
               {
+                "device_name": "/dev/xvdc",
                 "ebs": [
-                  { "volume_type": "gp2", "volume_size": 50 }
+                  {
+                    "volume_type": "gp2",
+                    "volume_size": 500
+                  }
                 ]
               }
             ]
           }
         },
         {
-          "address": "aws_autoscaling_group.asg_lc",
+          "address": "aws_autoscaling_group.asg1",
           "type": "aws_autoscaling_group",
           "values": {
-            "name": "asg-lc-demo"
-            
-          }
-        },
-
-      
-        {
-          "address": "aws_launch_template.lt1",
-          "type": "aws_launch_template",
-          "values": {
-            "instance_type": "m5.xlarge",
-            "block_device_mappings": [
-              {
-                "ebs": [
-                  { "volume_type": "io1", "volume_size": 200, "iops": 4000 }
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "address": "aws_autoscaling_group.asg_lt",
-          "type": "aws_autoscaling_group",
-          "values": {
-            "name": "asg-lt-demo",
-            "desired_capacity": 3
+            "desired_capacity": 3,
+            "launch_configuration": "aws_launch_configuration.lc1"
           }
         }
       ]

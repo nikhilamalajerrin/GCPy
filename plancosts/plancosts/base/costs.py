@@ -1,17 +1,13 @@
 """
-Cost calculation and breakdown logic (resource + subresources).
+Cost calculation on top of the refactored model.
 """
 from __future__ import annotations
-
-from typing import List, Tuple, Dict, Any
+from typing import List, Dict, Any, Tuple
 from decimal import Decimal, ROUND_HALF_UP
-
-from .resource import Resource
-from .pricecomponent import PriceComponent
-from .query import build_query, get_query_results, extract_price_from_result
+from plancosts.base.resource import Resource, PriceComponent
+from plancosts.base.query import run_queries, extract_price_from_result
 
 HOURS_IN_MONTH = Decimal(730)
-
 
 class PriceComponentCost:
     def __init__(self, price_component: PriceComponent, hourly_cost: Decimal, monthly_cost: Decimal):
@@ -19,73 +15,58 @@ class PriceComponentCost:
         self.hourly_cost = hourly_cost
         self.monthly_cost = monthly_cost
 
-
 class ResourceCostBreakdown:
     def __init__(self, resource: Resource, price_component_costs: List[PriceComponentCost], sub_resource_costs: List["ResourceCostBreakdown"] | None = None):
         self.resource = resource
         self.price_component_costs = price_component_costs
         self.sub_resource_costs = sub_resource_costs or []
 
+def _round6(d: Decimal) -> Decimal:
+    return d.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
-def _batch_queries(resource: Resource) -> Tuple[List[Tuple[Resource, PriceComponent]], List[Any]]:
-    keys: List[Tuple[Resource, PriceComponent]] = []
-    queries: List[Any] = []
-    for pc in resource.price_components():
-        if pc.should_skip(): continue
-        keys.append((resource, pc))
-        queries.append(build_query(pc.get_filters()))
-    for sub in resource.sub_resources():
-        for pc in sub.price_components():
-            if pc.should_skip(): continue
-            keys.append((sub, pc))
-            queries.append(build_query(pc.get_filters()))
-    return keys, queries
+def _set_price(pc: PriceComponent, result: Any) -> None:
+    price = Decimal(extract_price_from_result(result))
+    pc.set_price(price)
 
-
-def _unpack(resource: Resource, keys: List[Tuple[Resource, PriceComponent]], results: List[Any]) -> Tuple[List[Tuple[PriceComponent, Any]], Dict[Resource, List[Tuple[PriceComponent, Any]]]]:
-    res_results: List[Tuple[PriceComponent, Any]] = []
-    sub_results: Dict[Resource, List[Tuple[PriceComponent, Any]]] = {}
-    for i, r in enumerate(results):
-        target_res, pc = keys[i]
-        pair = (pc, r)
-        if target_res is resource:
-            res_results.append(pair)
-        else:
-            sub_results.setdefault(target_res, []).append(pair)
-    return res_results, sub_results
-
-
-def _round6(v: Decimal) -> Decimal:
-    return v.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-
-
-def _pc_cost(pc: PriceComponent, query_result: Any) -> PriceComponentCost:
-    price_str = extract_price_from_result(query_result)
-    price = Decimal(price_str) if price_str else Decimal("0")
-    hourly = pc.calculate_hourly_cost(price)
+def _pc_cost(pc: PriceComponent, result: Any) -> PriceComponentCost:
+    hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(pc, hourly, monthly)
 
-
-def get_cost_breakdown(resource: Resource) -> ResourceCostBreakdown:
-    keys, queries = _batch_queries(resource)
-    results = get_query_results(queries) if queries else []
-    res_pairs, sub_pairs_map = _unpack(resource, keys, results)
-
-    res_costs = [_pc_cost(pc, res) for pc, res in res_pairs]
+def _breakdown_for(resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
+    pc_costs: List[PriceComponentCost] = []
+    for pc in resource.price_components():
+        result = results_map.get(resource, {}).get(pc)
+        if result is not None:
+            pc_costs.append(_pc_cost(pc, result))
 
     sub_costs: List[ResourceCostBreakdown] = []
-    for sub_res, pairs in sub_pairs_map.items():
-        sub_pc_costs = [_pc_cost(pc, res) for pc, res in pairs]
-        sub_costs.append(ResourceCostBreakdown(resource=sub_res, price_component_costs=sub_pc_costs))
+    for sub in resource.sub_resources():
+        sub_results = results_map.get(sub, {})
+        if sub_results:
+            sub_costs.append(_breakdown_for(sub, results_map))
 
-    return ResourceCostBreakdown(resource=resource, price_component_costs=res_costs, sub_resource_costs=sub_costs)
+    return ResourceCostBreakdown(resource, pc_costs, sub_costs)
 
-
-def get_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
-    breakdowns: List[ResourceCostBreakdown] = []
+def generate_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
+    # 1) Run all queries and set prices on components
+    all_results: Dict[Resource, Dict[PriceComponent, Any]] = {}
     for r in resources:
-        if r.non_costable():
+        res = run_queries(r)
+        # set prices immediately
+        for rr, pcs in res.items():
+            for pc, result in pcs.items():
+                _set_price(pc, result)
+        all_results.update(res)
+
+    # 2) Build breakdowns only for costable resources
+    out: List[ResourceCostBreakdown] = []
+    for r in resources:
+        if not r.has_cost():
             continue
-        breakdowns.append(get_cost_breakdown(r))
-    return breakdowns
+        out.append(_breakdown_for(r, all_results))
+    return out
+
+# Backward-compatible alias for your existing main.py
+def get_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
+    return generate_cost_breakdowns(resources)
