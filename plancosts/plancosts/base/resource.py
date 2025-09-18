@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Any
 from abc import ABC, abstractmethod
+from decimal import Decimal
 
 from .filters import Filter
 from .mappings import ResourceMapping
@@ -20,11 +21,17 @@ class Resource(ABC):
     @abstractmethod
     def get_filters(self) -> List[Filter]: ...
     @abstractmethod
-    def add_reference(self, address: str, reference: "Resource"): ...
+    def add_reference(self, name: str, reference: "Resource"): ...
+    @abstractmethod
+    def add_sub_resources(self) -> None: ...
     @abstractmethod
     def sub_resources(self) -> List["Resource"]: ...
     @abstractmethod
     def price_components(self) -> List: ...
+    @abstractmethod
+    def adjust_cost(self, cost: Decimal) -> Decimal: ...
+    @abstractmethod
+    def non_costable(self) -> bool: ...
 
 
 class BaseResource(Resource):
@@ -38,35 +45,71 @@ class BaseResource(Resource):
         self._sub_resources: List[Resource] = []
 
         self._initialize_price_components()
-        self._initialize_sub_resources()
+        # NOTE: subresources are built *after* references are added via add_sub_resources()
 
     def _initialize_price_components(self) -> None:
         from .pricecomponent import BasePriceComponent
         for name, price_mapping in (self._resource_mapping.price_mappings or {}).items():
             self._price_components.append(BasePriceComponent(name, self, price_mapping))
 
-    def _initialize_sub_resources(self) -> None:
-        sub_map = getattr(self._resource_mapping, "sub_resource_mappings", {}) or {}
-        for name, sub_mapping in sub_map.items():
-            group_raw = self._raw_values.get(name)
-            if group_raw is None:
-                items: List[Dict[str, Any]] = []
-            elif isinstance(group_raw, list):
-                items = [rv for rv in group_raw if isinstance(rv, dict)]
-            elif isinstance(group_raw, dict):
-                items = [group_raw]
-            else:
-                items = []
-            for i, s_raw in enumerate(items):
-                sub_address = f"{self._address}.{name}.{i}"
-                self._sub_resources.append(
-                    BaseResource(sub_address, s_raw, sub_mapping, self._provider_filters)
-                )
-
+    # ----------------------------
+    # Resource interface
+    # ----------------------------
     def address(self) -> str: return self._address
     def raw_values(self) -> Dict[str, Any]: return self._raw_values
     def references(self) -> Dict[str, "Resource"]: return self._references
     def get_filters(self) -> List[Filter]: return self._provider_filters
-    def add_reference(self, address: str, reference: "Resource"): self._references[address] = reference
+    def add_reference(self, name: str, reference: "Resource"): self._references[name] = reference
+
+    def add_sub_resources(self) -> None:
+        """
+        Build subresources using:
+          - override_sub_resource_raw_values(resource) if provided
+          - else fall back to this resource's raw_values()
+        Address pattern mirrors Go: "<parent>.<name>[<i>]".
+        """
+        sub_map = getattr(self._resource_mapping, "sub_resource_mappings", {}) or {}
+        override_fn = getattr(self._resource_mapping, "override_sub_resource_raw_values", None)
+
+        sub_resources: List[Resource] = []
+        overridden: Dict[str, List[dict]] = override_fn(self) if override_fn else {}
+
+        for name, sub_mapping in sub_map.items():
+            # Prefer overridden raw values if provided
+            group_raw = overridden.get(name)
+
+            if group_raw is None:
+                # fallback to the resource raw values
+                val = self._raw_values.get(name)
+                if val is None:
+                    items: List[dict] = []
+                elif isinstance(val, list):
+                    items = [rv for rv in val if isinstance(rv, dict)]
+                elif isinstance(val, dict):
+                    items = [val]
+                else:
+                    items = []
+            else:
+                items = [rv for rv in group_raw if isinstance(rv, dict)]
+
+            for i, s_raw in enumerate(items):
+                sub_address = f"{self._address}.{name}[{i}]"
+                sub_resources.append(
+                    BaseResource(
+                        address=sub_address,
+                        raw_values=s_raw,
+                        resource_mapping=sub_mapping,
+                        provider_filters=self._provider_filters,
+                    )
+                )
+        self._sub_resources = sub_resources
+
     def sub_resources(self) -> List["Resource"]: return self._sub_resources
     def price_components(self) -> List: return self._price_components
+
+    def adjust_cost(self, cost: Decimal) -> Decimal:
+        fn = getattr(self._resource_mapping, "adjust_cost", None)
+        return fn(self, cost) if fn else cost
+
+    def non_costable(self) -> bool:
+        return bool(getattr(self._resource_mapping, "non_costable", False))

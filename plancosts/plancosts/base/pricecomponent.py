@@ -25,7 +25,7 @@ class PriceComponent(ABC):
 class BasePriceComponent(PriceComponent):
     def __init__(self, name: str, resource, price_mapping: PriceMapping):
         self._name = name
-        self._resource = resource  # keeps full access incl. .raw_values() and .references()
+        self._resource = resource
         self._price_mapping = price_mapping
 
     def name(self) -> str:
@@ -37,11 +37,12 @@ class BasePriceComponent(PriceComponent):
         return False
 
     def get_filters(self) -> List[Filter]:
-        mapping_filters = self._price_mapping.get_filters(self._resource.raw_values())
+        # CHANGED: mapping.get_filters now receives the Resource
+        mapping_filters = self._price_mapping.get_filters(self._resource)
         return merge_filters(self._resource.get_filters(), mapping_filters)
 
     def calculate_hourly_cost(self, price: Decimal) -> Decimal:
-        # CHANGED: mapping.calculate_cost now expects (price, resource)
+        # Custom cost transform (price, resource)
         if getattr(self._price_mapping, "calculate_cost", None):
             cost = self._price_mapping.calculate_cost(price, self._resource)
         else:
@@ -51,8 +52,13 @@ class BasePriceComponent(PriceComponent):
         unit = getattr(self._price_mapping, "time_unit", "hour") or "hour"
         denom = time_unit_seconds.get(unit)
         if not denom:
-            return cost
-        try:
-            return cost * (Decimal(time_unit_seconds["hour"]) / Decimal(denom))
-        except (InvalidOperation, ZeroDivisionError):
-            return cost
+            hourly = cost
+        else:
+            try:
+                hourly = cost * (Decimal(time_unit_seconds["hour"]) / Decimal(denom))
+            except (InvalidOperation, ZeroDivisionError):
+                hourly = cost
+
+        # NEW: let resource adjust final hourly cost (e.g., multiply by ASG desired capacity)
+        hourly = self._resource.adjust_cost(hourly)
+        return hourly

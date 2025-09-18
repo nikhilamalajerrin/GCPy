@@ -83,4 +83,9 @@ def get_cost_breakdown(resource: Resource) -> ResourceCostBreakdown:
 
 
 def get_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
-    return [get_cost_breakdown(r) for r in resources]
+    breakdowns: List[ResourceCostBreakdown] = []
+    for r in resources:
+        if r.non_costable():
+            continue
+        breakdowns.append(get_cost_breakdown(r))
+    return breakdowns

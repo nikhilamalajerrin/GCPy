@@ -1,6 +1,5 @@
 """
-AWS EBS volume & snapshot pricing mappings.
-Implements resource references (snapshot -> volume).
+AWS EBS volume & snapshot pricing mappings with safe reference guards.
 """
 from __future__ import annotations
 
@@ -9,23 +8,14 @@ from typing import Any, Dict
 
 from plancosts.base.filters import Filter
 from plancosts.base.mappings import PriceMapping, ResourceMapping, ValueMapping
-from plancosts.base.resource import Resource
 
-
-def _dec_from(v: Any, default: Decimal = Decimal(0)) -> Decimal:
-    if isinstance(v, Decimal):
-        return v
-    if v is None:
-        return default
+def _num(val, default: Decimal = Decimal(0)) -> Decimal:
     try:
-        return Decimal(str(v))
+        return Decimal(str(val))
     except Exception:
         return default
 
-
-# -------------------------
-# EBS Volume price components
-# -------------------------
+# --- existing volume mappings (keep yours if already present) ---
 EbsVolumeGB = PriceMapping(
     time_unit="month",
     default_filters=[
@@ -34,10 +24,8 @@ EbsVolumeGB = PriceMapping(
         Filter(key="volumeApiName", value="gp2"),
     ],
     value_mappings=[ValueMapping(from_key="type", to_key="volumeApiName")],
-    # CHANGED: (price, resource)
-    calculate_cost=lambda price, resource: price * _dec_from(resource.raw_values().get("size"), Decimal(8)),
+    calculate_cost=lambda price, resource: price * (_num((resource.raw_values() or {}).get("size"), Decimal(8))),
 )
-
 EbsVolumeIOPS = PriceMapping(
     time_unit="month",
     default_filters=[
@@ -48,51 +36,39 @@ EbsVolumeIOPS = PriceMapping(
     ],
     value_mappings=[ValueMapping(from_key="type", to_key="volumeApiName")],
     should_skip=lambda values: values.get("type") != "io1",
-    # CHANGED: (price, resource)
-    calculate_cost=lambda price, resource: price * _dec_from(resource.raw_values().get("iops"), Decimal(0)),
+    calculate_cost=lambda price, resource: price * _num((resource.raw_values() or {}).get("iops"), Decimal(0)),
 )
+EbsVolume = ResourceMapping(price_mappings={"GB": EbsVolumeGB, "IOPS": EbsVolumeIOPS})
 
-EbsVolume = ResourceMapping(
-    price_mappings={
-        "GB": EbsVolumeGB,
-        "IOPS": EbsVolumeIOPS,
-    }
-)
+# --- snapshots (SAFE) ---
+def _ref(resource, key: str):
+    """Safe getter for a reference by name."""
+    refs = resource.references()
+    return refs.get(key) if isinstance(refs, dict) else None
 
-# -------------------------
-# EBS Snapshot price components (use references)
-# -------------------------
 EbsSnapshotGB = PriceMapping(
     time_unit="month",
     default_filters=[
         Filter(key="servicecode", value="AmazonEC2"),
         Filter(key="productFamily", value="Storage Snapshot"),
     ],
-    # price * referenced volume size via references()["volume_id"]
-    calculate_cost=lambda price, resource: price * _dec_from(
-        (resource.references().get("volume_id").raw_values().get("size")) if resource.references().get("volume_id") else None,
+    calculate_cost=lambda price, resource: price * _num(
+        (_ref(resource, "volume_id").raw_values().get("size")) if _ref(resource, "volume_id") else None,
         Decimal(8),
     ),
 )
-
-EbsSnapshot = ResourceMapping(
-    price_mappings={
-        "GB": EbsSnapshotGB,
-    }
-)
+EbsSnapshot = ResourceMapping(price_mappings={"GB": EbsSnapshotGB})
 
 EbsSnapshotCopyGB = PriceMapping(
     time_unit=EbsSnapshotGB.time_unit,
     default_filters=list(EbsSnapshotGB.default_filters),
-    # price * size from references()["source_snapshot_id"].references()["volume_id"].raw_values()["size"]
-    calculate_cost=lambda price, resource: price * _dec_from(
+    calculate_cost=lambda price, resource: price * _num(
         (
-            resource.references().get("source_snapshot_id")
-            and resource.references()["source_snapshot_id"].references().get("volume_id")
-            and resource.references()["source_snapshot_id"].references()["volume_id"].raw_values().get("size")
+            _ref(_ref(resource, "source_snapshot_id"), "volume_id").raw_values().get("size")
+            if _ref(resource, "source_snapshot_id") and _ref(_ref(resource, "source_snapshot_id"), "volume_id")
+            else None
         ),
         Decimal(8),
     ),
 )
-
-EbsSnapshot
+EbsSnapshotCopy = ResourceMapping(price_mappings={"GB": EbsSnapshotCopyGB})

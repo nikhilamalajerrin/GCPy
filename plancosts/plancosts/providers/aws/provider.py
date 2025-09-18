@@ -1,8 +1,14 @@
 """
 AWS provider-specific configurations and mappings.
 """
+from __future__ import annotations
 from typing import List, Dict
 from plancosts.base.filters import Filter
+
+from plancosts.base.mappings import ResourceMapping
+
+# Default mapping for unknown resources: do not cost
+DefaultResourceMapping = ResourceMapping(non_costable=True)
 
 
 # AWS region to location name mapping
