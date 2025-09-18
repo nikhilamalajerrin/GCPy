@@ -11,8 +11,8 @@ import click
 
 from plancosts.parsers.terraform import parse_plan_file
 from plancosts.base.costs import get_cost_breakdowns
-from plancosts.outputs.json import to_json
-from plancosts.outputs.table import to_table  # NEW
+from plancosts.output.json import to_json
+from plancosts.output.table import to_table  # NEW
 
 
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))

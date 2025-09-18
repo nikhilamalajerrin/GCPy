@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import List, Dict, Any
 
-from plancosts.outputs.json import to_json  # reuse the stable JSON layout
+from plancosts.output.json import to_json  # reuse the stable JSON layout
 import json
 
 
