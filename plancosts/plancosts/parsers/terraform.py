@@ -12,13 +12,14 @@ from typing import Dict, Any, List, Optional
 from plancosts.base.resource import Resource  # type: ignore
 
 # Typed AWS Terraform resources
-from plancosts.providers.aws_terraform.ebs_volume import EbsVolume
-from plancosts.providers.aws_terraform.ebs_snapshot import EbsSnapshot
-from plancosts.providers.aws_terraform.ebs_snapshot_copy import EbsSnapshotCopy
-from plancosts.providers.aws_terraform.ec2_instance import Ec2Instance
-from plancosts.providers.aws_terraform.ec2_launch_configuration import Ec2LaunchConfiguration
-from plancosts.providers.aws_terraform.ec2_launch_template import Ec2LaunchTemplate
-from plancosts.providers.aws_terraform.ec2_autoscaling_group import Ec2AutoscalingGroup
+from plancosts.providers.terraform.aws.ebs_volume import EbsVolume
+from plancosts.providers.terraform.aws.ebs_snapshot import EbsSnapshot
+from plancosts.providers.terraform.aws.ebs_snapshot_copy import EbsSnapshotCopy
+from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
+from plancosts.providers.terraform.aws.ec2_launch_configuration import Ec2LaunchConfiguration
+from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
+from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
+
 
 
 def _aws_region(plan_data: Dict[str, Any]) -> str:

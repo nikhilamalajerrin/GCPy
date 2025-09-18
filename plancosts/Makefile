@@ -47,8 +47,12 @@ fmt:
 	black .
 	isort .
 
+deps:
+	$(PIP) install -U pip wheel build
+	$(PIP) install -U black isort ruff mypy pytest
+
 lint:
-	flake8 $(PACKAGE) tests || true
+	ruff check .
 
 typecheck:
 	mypy $(PACKAGE) || true
