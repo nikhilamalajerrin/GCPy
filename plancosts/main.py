@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
 Main entry point for plancosts - Generate cost reports from Terraform plans.
+
+This version matches the Go CLI UX:
+- Supports --tfplan-json OR (--tfplan with --tfpath) OR just --tfpath
+- Prints argument/validation errors in bright red (like color.HiRed in Go)
+- Defaults to table output; supports --output json
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import json
-import click
 import logging
+import click
 
 # Optional: load .env / .env.local like the Go version
 try:
@@ -28,36 +34,55 @@ from plancosts.output.json import to_json
 from plancosts.output.table import to_table
 
 
+def _fail(msg: str, ctx: click.Context | None = None) -> None:
+    """Print a bright red error then exit; optionally show help."""
+    click.secho(msg, fg="bright_red", err=True)
+    if ctx is not None:
+        click.echo(ctx.get_help(), err=True)
+    raise SystemExit(1)
+
+
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option(
     "--tfplan-json",
-    type=click.Path(exists=True, dir_okay=False, readable=True),
+    # We validate existence ourselves so we can print red errors.
+    type=click.Path(exists=False, dir_okay=False, readable=True),
     help="Path to Terraform plan JSON file (from `terraform show -json`).",
 )
 @click.option(
     "--tfplan",
-    type=click.Path(exists=True, dir_okay=False, readable=True),
+    type=click.Path(exists=False, dir_okay=False, readable=True),
     help="Path to Terraform binary plan file (requires --tfpath).",
 )
 @click.option(
     "--tfpath",
-    type=click.Path(exists=True, file_okay=False, readable=True),
-    help="Path to the Terraform project directory. If provided without --tfplan, "
-         "we run `terraform init/plan/show -json` to generate the plan JSON.",
+    type=click.Path(exists=False, file_okay=False, readable=True),
+    help=(
+        "Path to the Terraform project directory. "
+        "If provided without --tfplan, runs `terraform init/plan/show -json` to generate the plan JSON."
+    ),
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Choice(["table", "json"], case_sensitive=False),
     default="table",
     show_default=True,
-    help="Output format",
+    help="Output format.",
 )
 @click.option(
-    "-v", "--verbose",
+    "-v",
+    "--verbose",
     is_flag=True,
-    help="Verbose logging",
+    help="Verbose logging.",
 )
-def main(tfplan_json: str | None, tfplan: str | None, tfpath: str | None, output: str, verbose: bool) -> None:
+def main(
+    tfplan_json: str | None,
+    tfplan: str | None,
+    tfpath: str | None,
+    output: str,
+    verbose: bool,
+) -> None:
     """Generate cost reports from Terraform plans."""
     # Logging
     logging.basicConfig(
@@ -65,18 +90,36 @@ def main(tfplan_json: str | None, tfplan: str | None, tfpath: str | None, output
         format="%(levelname)s: %(message)s",
     )
 
-    # Arg validation (mirror the Go UX)
-    if tfplan_json and tfplan:
-        click.echo("Please provide only one of --tfplan-json or --tfplan.", err=True)
-        sys.exit(1)
+    ctx = click.get_current_context()
 
-    if not tfplan_json and not (tfplan or tfpath):
-        click.echo("Provide either --tfplan-json OR (--tfplan with --tfpath) OR --tfpath.", err=True)
-        sys.exit(1)
+    # Argument validation (mirror Go CLI messages, but red)
+    if tfplan_json and tfplan:
+        _fail(
+            "Please only provide one of either a Terraform Plan JSON file (--tfplan-json) or a Terraform Plan file (--tfplan).",
+            ctx,
+        )
 
     if tfplan and not tfpath:
-        click.echo("When using --tfplan, you must also provide --tfpath.", err=True)
-        sys.exit(1)
+        _fail(
+            "Please provide a path to the Terraform project (--tfpath) if providing a Terraform Plan file (--tfplan).\n",
+            ctx,
+        )
+
+    if not tfplan_json and not tfpath:
+        _fail(
+            "Please provide either the path to the Terraform project (--tfpath) or a Terraform Plan JSON file (--tfplan-json).",
+            ctx,
+        )
+
+    # Existence checks so errors are ours (and red), not Click's
+    if tfplan_json and not os.path.isfile(tfplan_json):
+        _fail(f"File not found: --tfplan-json '{tfplan_json}'")
+
+    if tfplan and not os.path.isfile(tfplan):
+        _fail(f"File not found: --tfplan '{tfplan}'")
+
+    if tfpath and not os.path.isdir(tfpath):
+        _fail(f"Directory not found: --tfpath '{tfpath}'")
 
     try:
         # Acquire plan JSON
@@ -86,27 +129,27 @@ def main(tfplan_json: str | None, tfplan: str | None, tfpath: str | None, output
             # Either: (tfpath only) OR (tfplan + tfpath)
             plan_json = generate_plan_json(tfpath, tfplan)
 
+        # Parse resources
         resources = parse_plan_json(plan_json)
         if not resources:
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
+        # Compute cost breakdowns
         breakdowns = get_cost_breakdowns(resources)
 
+        # Render output
         if output.lower() == "json":
             click.echo(to_json(breakdowns))
         else:
             click.echo(to_table(breakdowns))
 
     except FileNotFoundError as e:
-        click.echo(f"Error: File not found: {e}", err=True)
-        sys.exit(1)
+        _fail(f"Error: File not found: {e}")
     except json.JSONDecodeError as e:
-        click.echo(f"Error: Invalid JSON: {e}", err=True)
-        sys.exit(1)
+        _fail(f"Error: Invalid JSON: {e}")
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        _fail(f"Error: {e}")
 
 
 if __name__ == "__main__":
