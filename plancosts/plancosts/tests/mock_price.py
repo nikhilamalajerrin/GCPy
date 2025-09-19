@@ -425,6 +425,49 @@ class H(BaseHTTPRequestHandler):
 # -------------------
 # Self-tests (no pytest)
 # -------------------
+# --- keep the server implementation you already have from the prior step ---
+# (regex-aware, tenancy self-tests, etc.)
+# Just ensure _run_self_tests() includes the extra assertions below.
+
+def _run_self_tests():
+    from plancosts.base.filters import ValueMapping, map_filters
+
+    # (1) Tenancy mapping (unchanged)
+    vm_inst = ValueMapping(from_key="tenancy", to_key="tenancy", map_func=lambda v: "Dedicated" if f"{v}"=="dedicated" else "Shared")
+    vm_lc   = ValueMapping(from_key="placement_tenancy", to_key="tenancy", map_func=lambda v: "Dedicated" if f"{v}"=="dedicated" else "Shared")
+    assert any(f.key=="tenancy" and f.value=="Dedicated" for f in map_filters([vm_inst], {"tenancy":"dedicated"}))
+    assert any(f.key=="tenancy" and f.value=="Shared"     for f in map_filters([vm_inst], {"tenancy":"default"}))
+    assert any(f.key=="tenancy" and f.value=="Dedicated" for f in map_filters([vm_lc],  {"placement_tenancy":"dedicated"}))
+    assert any(f.key=="tenancy" and f.value=="Shared"     for f in map_filters([vm_lc],  {"placement_tenancy":"default"}))
+
+    # (2) Snapshot regex still works
+    attrs_snapshot_regex = [
+        {"key":"servicecode","value":"AmazonEC2","operation":"=="},
+        {"key":"productFamily","value":"Storage Snapshot","operation":"=="},
+        {"key":"usagetype","value":"/EBS:SnapshotUsage/","operation":"REGEX"},
+    ]
+    assert _response_for_filters(attrs_snapshot_regex), "Snapshot REGEX should return product"
+
+    # (3) NEW: Fixture has *no* root_block_device sizes so default 8GB path is exercised
+    with open("test.json", "r", encoding="utf-8") as f:
+        plan = json.load(f)
+
+    inst = next(r for r in plan["planned_values"]["root_module"]["resources"] if r["address"]=="aws_instance.example")
+    lc   = next(r for r in plan["planned_values"]["root_module"]["resources"] if r["address"]=="aws_launch_configuration.lc1")
+
+    # Instance: either missing root_block_device, or present but no size fields
+    rbd_inst = inst["values"].get("root_block_device")
+    assert (rbd_inst in (None, [], {}) or (isinstance(rbd_inst, list) and rbd_inst and not any(k in rbd_inst[0] for k in ("size","volume_size")))), \
+        "Fixture should omit root_block_device size for instance"
+
+    # Launch configuration: same check
+    rbd_lc = lc["values"].get("root_block_device")
+    assert (rbd_lc in (None, [], {}) or (isinstance(rbd_lc, list) and rbd_lc and not any(k in rbd_lc[0] for k in ("size","volume_size")))), \
+        "Fixture should omit root_block_device size for launch configuration"
+
+    print("SELF TESTS PASSED")
+
+
 
 def _normalize_tenancy(v):
     return "Dedicated" if f"{v}" == "dedicated" else "Shared"
