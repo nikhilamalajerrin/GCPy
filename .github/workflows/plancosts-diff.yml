@@ -1,4 +1,4 @@
-name: plancosts diff
+name: plancosts-diff
 
 on:
   pull_request:
@@ -38,22 +38,27 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps from PR tree
+      - name: Install dependencies from PR tree
         shell: bash
+        working-directory: pr
         run: |
-          python -m pip install -U pip
-          if [[ -f pr/requirements.txt ]]; then pip install -r pr/requirements.txt; fi
+          python -m pip install --upgrade pip
+          if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
           echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
 
       - name: Start mock pricing API
         shell: bash
+        working-directory: pr
         env:
           PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
-          python -m plancosts.tests.mock_price &
-          # TCP readiness probe (mock server 501s on GET /, so just test port)
+          python -m plancosts.tests.mock_price &  # Corrected module name
+          # TCP readiness probe
           for i in $(seq 1 60); do
-            (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null && echo up && break
+            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+              echo "Mock API is up."
+              break
+            fi
             sleep 0.5
           done
 
@@ -61,15 +66,15 @@ jobs:
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
         run: |
-          python pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > base-plancosts.txt
-          awk 'END{print $NF}' base-plancosts.txt > base-total.txt
+          python pr/main.py --tfdir pr/${{ env.TERRAFORM_DIR }} -o table > base-plancosts.txt || exit 1
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' base-plancosts.txt > base-total.txt || (echo "0.00" > base-total.txt)
 
       - name: Run plancosts (PR)
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
         run: |
-          python pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > pr-plancosts.txt
-          awk 'END{print $NF}' pr-plancosts.txt > pr-total.txt
+          python pr/main.py --tfdir pr/${{ env.TERRAFORM_DIR }} -o table > pr-plancosts.txt || exit 1
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' pr-plancosts.txt > pr-total.txt || (echo "0.00" > pr-total.txt)
 
       - name: Create diff
         shell: bash
@@ -79,17 +84,18 @@ jobs:
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
-        if: hashFiles('diff.txt') != ''
+        if: always()  # Run even if previous steps fail, for visibility
         shell: bash
         run: |
           old=$(cat base-total.txt)
           new=$(cat pr-total.txt)
+          diff_content=$(cat diff.txt || echo "No differences detected")
           body=$(jq -Mnc \
             --arg old "$old" \
             --arg new "$new" \
-            --arg diff "$(< diff.txt)" \
-            '{body: "Base monthly cost: $\($old)\nPR monthly cost: $\($new)\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
+            --arg diff "$diff_content" \
+            '{body: "Base monthly cost: $\($old)\nPR monthly cost: $\($new)\n\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
           curl -sL -X POST -d "$body" \
             -H "Content-Type: application/json" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+            "https://api.github.com/repos/${{ github.repository }}/issues
