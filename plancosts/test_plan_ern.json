@@ -37,7 +37,37 @@
             "address": "aws_nat_gateway.nat",
             "expressions": { "allocation_id": { "references": ["aws_eip.nat1"] } }
           }
-        ]
+        ],
+        "module_calls": {
+          "web_app": {
+            "source": "./web_app",
+            "module": {
+              "resources": [
+                {
+                  "address": "aws_instance.web_app",
+                  "expressions": {
+                    "root_block_device": [ {} ],
+                    "ebs_block_device": [ {} ]
+                  }
+                }
+              ]
+            }
+          },
+          "storage": {
+            "source": "./storage",
+            "module": {
+              "resources": [
+                { "address": "aws_ebs_volume.standard", "expressions": {} },
+                {
+                  "address": "aws_ebs_snapshot.standard",
+                  "expressions": {
+                    "volume_id": { "references": ["aws_ebs_volume.standard"] }
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
     },
     "planned_values": {
@@ -49,7 +79,7 @@
             "values": {
               "instance_type": "m5.large",
               "tenancy": "default",
-              "root_block_device": [ {} ],              
+              "root_block_device": [ {} ],
               "ebs_block_device": [
                 { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
                 { "volume_type": "gp2", "volume_size": 200 }
@@ -77,7 +107,7 @@
             "values": {
               "instance_type": "m5.large",
               "placement_tenancy": "default",
-              "root_block_device": [ {} ],               
+              "root_block_device": [ {} ],
               "block_device_mappings": [
                 {
                   "device_name": "/dev/xvdb",
@@ -115,6 +145,40 @@
             "address": "aws_nat_gateway.nat",
             "type": "aws_nat_gateway",
             "values": { "allocation_id": "aws_eip.nat1", "subnet_id": "subnet-123456" }
+          }
+        ],
+        "child_modules": [
+          {
+            "address": "module.web_app[\"us-east-1a\"]",
+            "resources": [
+              {
+                "address": "aws_instance.web_app",
+                "type": "aws_instance",
+                "values": {
+                  "instance_type": "t3.micro",
+                  "tenancy": "default",
+                  "root_block_device": [ {} ],
+                  "ebs_block_device": [
+                    { "volume_type": "gp2", "volume_size": 15 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "address": "module.storage[0]",
+            "resources": [
+              {
+                "address": "aws_ebs_volume.standard",
+                "type": "aws_ebs_volume",
+                "values": { "type": "standard", "size": 30 }
+              },
+              {
+                "address": "aws_ebs_snapshot.standard",
+                "type": "aws_ebs_snapshot",
+                "values": { "volume_id": "aws_ebs_volume.standard" }
+              }
+            ]
           }
         ]
       }
