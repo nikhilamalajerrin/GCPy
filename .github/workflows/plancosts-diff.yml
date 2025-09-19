@@ -1,0 +1,135 @@
+name: plancosts-diff
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - 'plancosts/**'
+      - 'main.py'
+      - '.github/workflows/plancosts-diff.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TERRAFORM_DIR: examples/terraform_0_13
+  PLANCOSTS_API_URL: http://127.0.0.1:4000
+
+jobs:
+  cost-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base (merge target)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          fetch-depth: 0  # Ensure full history is fetched
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0  # Ensure full history is fetched
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies from PR tree
+        shell: bash
+        working-directory: pr
+        run: |
+          python -m pip install --upgrade pip
+          if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
+
+      - name: Start mock pricing API
+        shell: bash
+        working-directory: pr
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
+        run: |
+          echo "Starting mock pricing API..."
+          python -m plancosts.tests.mock_price &  # Confirmed from directory structure
+          # TCP readiness probe with error handling
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+              echo "Mock API is up."
+              break
+            fi
+            echo "Waiting for mock API (attempt $i/60)..."
+            sleep 0.5
+          done
+          if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+            echo "Error: Mock API failed to start after 30 seconds."
+            exit 1
+          fi
+
+      - name: Run plancosts (base)
+        env:
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+        run: |
+          echo "Running plancosts on base..."
+          cd base
+          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+            python ../pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { echo "plancosts failed"; exit 1; }
+          else
+            echo "Warning: Terraform directory ${{ env.TERRAFORM_DIR }} not found in base. Using fallback test plan."
+            if [ -f "../pr/test_plan_ern.json" ]; then
+              python ../pr/main.py --tfjson ../pr/test_plan_ern.json -o table > ../base-plancosts.txt || { echo "Fallback plancosts failed"; exit 1; }
+            else
+              echo "Error: No test plan found in PR directory."
+              exit 1
+            fi
+          fi
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || { echo "0.00" > ../base-total.txt; echo "Warning: No OVERALL TOTAL found in base output"; }
+
+      - name: Run plancosts (PR)
+        env:
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+        run: |
+          echo "Running plancosts on PR..."
+          cd pr
+          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || { echo "plancosts failed"; exit 1; }
+          else
+            echo "Warning: Terraform directory ${{ env.TERRAFORM_DIR }} not found in PR. Using fallback test plan."
+            if [ -f "test_plan_ern.json" ]; then
+              python main.py --tfjson test_plan_ern.json -o table > ../pr-plancosts.txt || { echo "Fallback plancosts failed"; exit 1; }
+            else
+              echo "Error: No test plan found in PR directory."
+              exit 1
+            fi
+          fi
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || { echo "0.00" > ../pr-total.txt; echo "Warning: No OVERALL TOTAL found in PR output"; }
+
+      - name: Create diff
+        shell: bash
+        run: |
+          echo "Creating diff..."
+          diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
+          echo "Base total: $(cat base-total.txt)"
+          echo "PR total:   $(cat pr-total.txt)"
+
+      - name: Comment with cost diff
+        if: always()  # Run even if previous steps fail, for visibility
+        shell: bash
+        run: |
+          echo "Posting PR comment..."
+          old=$(cat base-total.txt || echo "0.00")
+          new=$(cat pr-total.txt || echo "0.00")
+          diff_content=$(cat diff.txt || echo "No differences detected")
+          body=$(jq -Mnc \
+            --arg old "$old" \
+            --arg new "$new" \
+            --arg diff "$diff_content" \
+            '{body: "Base monthly cost: $\($old)\nPR monthly cost: $\($new)\n\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
+          curl -sL -X POST -d "$body" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" || echo "Failed to post comment: $?"
