@@ -1,5 +1,9 @@
 """
 Typed AWS EC2 Instance + Block Device resources (aws_terraform).
+
+Update: handle EC2 instances with *no* additional volumes (commit parity).
+- root_block_device may be missing, dict, or list-of-dict
+- ebs_block_device may be missing, None, or list-of-dict
 """
 from __future__ import annotations
 
@@ -35,7 +39,11 @@ class Ec2BlockDeviceGB(BaseAwsPriceComponent):
             Filter(key="productFamily", value="Storage"),
             Filter(key="volumeApiName", value="gp2"),
         ]
-        self.value_mappings = [ValueMapping(from_key="volume_type", to_key="volumeApiName")]
+        # Accept both volume_type (instance/LT/LC) and type (older shapes) -> volumeApiName
+        self.value_mappings = [
+            ValueMapping(from_key="volume_type", to_key="volumeApiName"),
+            ValueMapping(from_key="type",        to_key="volumeApiName"),
+        ]
 
     def hourly_cost(self) -> Decimal:
         base_hourly = super().hourly_cost()
@@ -52,7 +60,10 @@ class Ec2BlockDeviceIOPS(BaseAwsPriceComponent):
             Filter(key="usagetype", value="/EBS:VolumeP-IOPS.piops/", operation="REGEX"),
             Filter(key="volumeApiName", value="gp2"),
         ]
-        self.value_mappings = [ValueMapping(from_key="volume_type", to_key="volumeApiName")]
+        self.value_mappings = [
+            ValueMapping(from_key="volume_type", to_key="volumeApiName"),
+            ValueMapping(from_key="type",        to_key="volumeApiName"),
+        ]
 
     def hourly_cost(self) -> Decimal:
         base_hourly = super().hourly_cost()
@@ -86,7 +97,7 @@ class Ec2InstanceHours(BaseAwsPriceComponent):
         ]
         self.value_mappings = [
             ValueMapping(from_key="instance_type", to_key="instanceType"),
-            ValueMapping(from_key="tenancy", to_key="tenancy"),
+            ValueMapping(from_key="tenancy",       to_key="tenancy"),
         ]
 
 
@@ -99,14 +110,18 @@ class Ec2Instance(BaseAwsResource):
         # Price components
         self._set_price_components([Ec2InstanceHours("Instance hours", self)])
 
-        # Subresources: root_block_device (single) + ebs_block_device (list)
+        # Subresources: handle absent or differently-shaped blocks safely
         subs: List[BaseAwsResource] = []
 
+        # root_block_device: can be dict or list-of-dict or missing
         rbd = self.raw_values().get("root_block_device")
         if isinstance(rbd, dict) and rbd:
             subs.append(Ec2BlockDevice(f"{self.address()}.root_block_device", self.region(), rbd))
+        elif isinstance(rbd, list) and rbd and isinstance(rbd[0], dict):
+            subs.append(Ec2BlockDevice(f"{self.address()}.root_block_device", self.region(), rbd[0]))
 
-        ebs_list = self.raw_values().get("ebs_block_device", [])
+        # ebs_block_device: may be missing/None or list-of-dict
+        ebs_list = self.raw_values().get("ebs_block_device") or []
         if isinstance(ebs_list, list):
             for i, item in enumerate(ebs_list):
                 if isinstance(item, dict):
