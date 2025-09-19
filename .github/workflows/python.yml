@@ -39,7 +39,7 @@ jobs:
           pip install black isort ruff mypy pytest build wheel
           # If you have packaging metadata, install editable; else set PYTHONPATH
           if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
-            pip install -e .
+            pip install -e ./plancosts
           else
             # <-- KEY FIX: add the inner package path so `import plancosts` works
             echo "PYTHONPATH=$GITHUB_WORKSPACE/plancosts:$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
