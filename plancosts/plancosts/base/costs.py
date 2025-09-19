@@ -24,8 +24,41 @@ class ResourceCostBreakdown:
     price_component_costs: List[PriceComponentCost]
     sub_resource_costs: List["ResourceCostBreakdown"]
 
-def _set_price_from_query(pc: PriceComponent, result: Any) -> None:
-    price = Decimal(extract_price_from_result(result))
+def _set_price_from_query(pc, result):
+    try:
+        products = (result or {}).get("data", {}).get("products", []) or []
+        addr = getattr(pc, "resource", None)
+        # Try to get address for logging
+        if callable(addr):
+            try:
+                res = pc.resource()
+                res_addr = getattr(res, "address", None)
+                if callable(res_addr):
+                    res_addr = res_addr()
+                elif res_addr is None:
+                    res_addr = getattr(res, "Address", lambda: "")()
+            except Exception:
+                res_addr = ""
+        else:
+            res_addr = ""
+
+        if not products:
+            if res_addr:
+                logging.warning("No prices found for %s, using 0.00", res_addr)
+            price = Decimal("0")
+        else:
+            if len(products) > 1 and res_addr:
+                logging.warning("Multiple prices found for %s, using the first price", res_addr)
+            p0 = products[0]
+            price_str = (
+                p0.get("onDemandPricing", [{}])[0]
+                  .get("priceDimensions", [{}])[0]
+                  .get("pricePerUnit", {})
+                  .get("USD", "0")
+            )
+            price = Decimal(str(price_str))
+    except Exception:
+        price = Decimal("0")
     pc.set_price(price)
 
 def _pc_cost(pc: PriceComponent) -> PriceComponentCost:

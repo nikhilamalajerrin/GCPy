@@ -5,7 +5,8 @@ Main entry point for plancosts - Generate cost reports from Terraform plans.
 Matches the Go CLI UX from commit 36a4950:
 - Supports --tfplan-json OR (--tfplan with --tfdir) OR just --tfdir
 - Prints validation errors in bright red
-- Uses a GraphQL QueryRunner, endpoint from --api-url or env (PLANCOSTS_API_URL), falling back to config default
+- Uses a GraphQL QueryRunner; endpoint from --api-url or env (PLANCOSTS_API_URL),
+  falling back to config default (and supports legacy env), via resolve_endpoint()
 - Defaults to table output; supports --output json
 """
 from __future__ import annotations
@@ -31,7 +32,7 @@ from plancosts.parsers.terraform import (
 )
 from plancosts.base.costs import get_cost_breakdowns
 from plancosts.base.query import GraphQLQueryRunner
-from plancosts.config import PRICE_LIST_API_ENDPOINT
+from plancosts.config import resolve_endpoint, PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table
 
@@ -104,13 +105,13 @@ def main(
 
     if tfplan and not tfdir:
         _fail(
-            "Please provide a path to the Terrafrom project (--tfdir) if providing a Terraform Plan file (--tfplan)\n",
+            "Please provide a path to the Terraform project (--tfdir) if providing a Terraform Plan file (--tfplan)\n",
             ctx,
         )
 
     if not tfplan_json and not tfdir:
         _fail(
-            "Please provide either the path to the Terrafrom project (--tfdir) or a Terraform Plan JSON file (--tfplan-json).",
+            "Please provide either the path to the Terraform project (--tfdir) or a Terraform Plan JSON file (--tfplan-json).",
             ctx,
         )
 
@@ -138,8 +139,10 @@ def main(
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
-        # Build endpoint: --api-url overrides env/config; append /graphql like the Go code
-        endpoint = f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
+        # Build endpoint:
+        # - --api-url overrides env/config/legacy
+        # - resolve_endpoint normalizes and appends /graphql if missing
+        endpoint = resolve_endpoint(api_url) if api_url else PRICE_LIST_API_ENDPOINT
         runner = GraphQLQueryRunner(endpoint)
 
         # Compute cost breakdowns (runner + resources)
@@ -152,6 +155,9 @@ def main(
             click.echo(to_table(breakdowns))
 
     except FileNotFoundError as e:
+        # Friendly note if the terraform CLI isn't found during generate_plan_json
+        if "terraform" in str(e).lower():
+            _fail("Error: Terraform CLI not found. Please install Terraform and ensure it's on your PATH.")
         _fail(f"Error: File not found: {e}")
     except json.JSONDecodeError as e:
         _fail(f"Error: Invalid JSON: {e}")

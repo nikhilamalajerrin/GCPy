@@ -1,11 +1,141 @@
 # mock_pricing_api.py
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
+import re
+
+# -------------------
+# Config via env vars
+# -------------------
+MODE = os.getenv("MOCK_MODE", "normal").lower()
+#   normal     -> return one product per query (default)
+#   multiple   -> return 2 products (to trigger "Multiple prices found..." warning)
+#   none       -> return []
+#   error      -> return HTTP 500
+
+DEFAULT_PRICE = float(os.getenv("MOCK_BASE_PRICE", "0.0416"))
+
+OVERRIDE = {
+    # EC2 Compute Instance hours
+    "EC2_INSTANCE_HR": float(os.getenv("MOCK_PRICE_EC2", "0.0416")),
+    # EBS gp2/standard/sc1/st1 GB-month
+    "EBS_GB": float(os.getenv("MOCK_PRICE_EBS_GB", "0.10")),
+    # EBS io1 IOPS-month
+    "EBS_IOPS": float(os.getenv("MOCK_PRICE_EBS_IOPS", "0.0002")),
+    # EBS Snapshot GB-month (with usagetype=EBS:SnapshotUsage)
+    "SNAPSHOT_GB": float(os.getenv("MOCK_PRICE_SNAPSHOT_GB", "0.05")),
+    # ELB classic hours
+    "ELB_CLASSIC_HR": float(os.getenv("MOCK_PRICE_ELB_CLASSIC", "0.025")),
+    # ALB/NLB hours
+    "ELB_ALB_HR": float(os.getenv("MOCK_PRICE_ELB_ALB", "0.0225")),
+    "ELB_NLB_HR": float(os.getenv("MOCK_PRICE_ELB_NLB", "0.0225")),
+    # NAT Gateway hours
+    "NATGW_HR": float(os.getenv("MOCK_PRICE_NATGW_HR", "0.045")),
+
+    # ---------- NEW: RDS ----------
+    # RDS instance hours
+    "RDS_INSTANCE_HR": float(os.getenv("MOCK_PRICE_RDS_INSTANCE_HR", "0.0416")),
+    # RDS storage GB-month
+    "RDS_STORAGE_GB": float(os.getenv("MOCK_PRICE_RDS_STORAGE_GB", "0.10")),
+    # RDS provisioned IOPS-month
+    "RDS_IOPS": float(os.getenv("MOCK_PRICE_RDS_IOPS", "0.00004")),
+}
+
+def _usd(price: float) -> dict:
+    s = f"{price:.6f}"
+    s = s.rstrip("0").rstrip(".") if "." in s else s
+    return {"USD": s}
+
+def _product(price: float) -> dict:
+    return {
+        "onDemandPricing": [{
+            "priceDimensions": [{
+                "pricePerUnit": _usd(price)
+            }]
+        }]
+    }
+
+def _response_for_filters(attrs: list[dict]) -> list[dict]:
+    """
+    Very small 'pricing engine':
+    - looks at servicecode/productFamily/usagetype filters
+    - returns one/many/none products depending on MODE
+    """
+    # Normalize attributes into a quick dict: key -> [(op, val), ...]
+    bykey: dict[str, list[tuple[str, str]]] = {}
+    for a in attrs or []:
+        k = a.get("key", "")
+        op = a.get("operation", "")
+        v = a.get("value", "")
+        bykey.setdefault(k, []).append((op, v))
+
+    service = next((v for _, v in bykey.get("servicecode", [])[-1:]), "")
+    family  = next((v for _, v in bykey.get("productFamily", [])[-1:]), "")
+    usg     = next((v for _, v in bykey.get("usagetype",   [])[-1:]), "")
+
+    price = DEFAULT_PRICE
+
+    # -------- Decision table ----------
+    # EC2 compute instance hours
+    if service == "AmazonEC2" and family == "Compute Instance":
+        price = OVERRIDE["EC2_INSTANCE_HR"]
+
+    # EBS storage GB-month (gp2/standard/etc.)
+    elif service == "AmazonEC2" and family == "Storage":
+        price = OVERRIDE["EBS_GB"]
+
+    # EBS IOPS-month
+    elif service == "AmazonEC2" and family == "System Operation" and ("EBS:VolumeP-IOPS.piops" in usg or "EBS:VolumeP-IOPS.piops" in str(bykey.get("usagetype", ""))):
+        price = OVERRIDE["EBS_IOPS"]
+
+    # EBS Snapshot GB-month (requires EBS:SnapshotUsage)
+    elif service == "AmazonEC2" and family == "Storage Snapshot" and ("EBS:SnapshotUsage" in usg or "EBS:SnapshotUsage" in str(bykey.get("usagetype", ""))):
+        price = OVERRIDE["SNAPSHOT_GB"]
+
+    # ELB/ALB/NLB hours
+    elif service == "AWSELB" and ("Load Balancer" in family):
+        if family == "Load Balancer":
+            price = OVERRIDE["ELB_CLASSIC_HR"]
+        elif family == "Load Balancer-Application":
+            price = OVERRIDE["ELB_ALB_HR"]
+        elif family == "Load Balancer-Network":
+            price = OVERRIDE["ELB_NLB_HR"]
+
+    # NAT Gateway hours
+    elif service == "AmazonEC2" and family == "NAT Gateway" and ("NatGateway-Hours" in usg or "NatGateway-Hours" in str(bykey.get("usagetype", ""))):
+        price = OVERRIDE["NATGW_HR"]
+
+    # ---------- NEW: RDS pricing ----------
+    # RDS instance hours
+    elif service == "AmazonRDS" and family == "Database Instance":
+        price = OVERRIDE["RDS_INSTANCE_HR"]
+
+    # RDS storage GB-month
+    elif service == "AmazonRDS" and family == "Database Storage":
+        price = OVERRIDE["RDS_STORAGE_GB"]
+
+    # RDS provisioned IOPS-month
+    elif service == "AmazonRDS" and family == "Provisioned IOPS":
+        price = OVERRIDE["RDS_IOPS"]
+
+    # ------- Compose the products array based on MODE -------
+    if MODE == "none":
+        return []
+    elif MODE == "multiple":
+        return [_product(price), _product(price * 10.0)]
+    else:
+        return [_product(price)]
 
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
+        # Optional: simulate server error
+        if MODE == "error":
+            self.send_error(500, "Simulated server error")
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8")
+
         try:
             queries = json.loads(body)
             if not isinstance(queries, list):
@@ -13,18 +143,11 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             queries = []
 
-        # Always return the same price so your multipliers (GB, IOPS, instance count) create the totals you saw.
-        resp = [{
-            "data": {
-                "products": [{
-                    "onDemandPricing": [{
-                        "priceDimensions": [{
-                            "pricePerUnit": {"USD": "0.0416"}
-                        }]
-                    }]
-                }]
-            }
-        } for _ in queries]
+        resp = []
+        for q in queries:
+            attrs = (((q or {}).get("variables") or {}).get("filter") or {}).get("attributes", [])
+            products = _response_for_filters(attrs)
+            resp.append({"data": {"products": products}})
 
         out = json.dumps(resp).encode("utf-8")
         self.send_response(200)
@@ -34,5 +157,8 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(out)
 
 if __name__ == "__main__":
-    print("Mock pricing API on http://127.0.0.1:4000/")
+    print("Mock pricing API on http://127.0.0.1:4000/  (set PLANCOSTS_API_URL=http://127.0.0.1:4000)")
+    print(f"MODE={MODE}  DEFAULT_PRICE={DEFAULT_PRICE}")
+    for k, v in OVERRIDE.items():
+        print(f"  {k}={v}")
     HTTPServer(("127.0.0.1", 4000), H).serve_forever()
