@@ -21,10 +21,11 @@ class EbsSnapshotCopyGB(BaseAwsPriceComponent):
     def __init__(self, name: str, resource: "EbsSnapshotCopy"):
         super().__init__(name=name, resource=resource, time_unit="month")
         self.default_filters = [
-        Filter(key="servicecode", value="AmazonEC2"),
-        Filter(key="productFamily", value="Storage Snapshot"),
-        Filter(key="usagetype", value="EBS:SnapshotUsage"),  # NEW
-    ]
+            Filter(key="servicecode", value="AmazonEC2"),
+            Filter(key="productFamily", value="Storage Snapshot"),
+            # Commit 8d1b805: anchor to end so we don't match ...UnderBilling
+            Filter(key="usagetype", value="/EBS:SnapshotUsage$/", operation="REGEX"),
+        ]
 
     def hourly_cost(self) -> Decimal:
         base_hourly = super().hourly_cost()

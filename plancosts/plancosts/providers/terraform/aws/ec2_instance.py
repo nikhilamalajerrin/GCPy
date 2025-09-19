@@ -4,21 +4,28 @@ Typed AWS EC2 Instance + Block Device resources (aws_terraform).
 Update: handle EC2 instances with *no* additional volumes (commit parity).
 - root_block_device may be missing, dict, or list-of-dict
 - ebs_block_device may be missing, None, or list-of-dict
+- Tenancy normalization (Infracost 337a504): "dedicated" -> "Dedicated", else "Shared"
+- Default 8GB root device when no size present or block missing (Infracost 3a509d5)
 """
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Dict, Any, List
 
-from plancosts.base.filters import Filter
-from plancosts.base.filters import ValueMapping
+from plancosts.base.filters import Filter, ValueMapping
 from .base import BaseAwsResource, BaseAwsPriceComponent, _to_decimal, DEFAULT_VOLUME_SIZE
+
+
+# ---------- helpers ----------
+
+def _normalize_tenancy(v: Any) -> str:
+    return "Dedicated" if f"{v}" == "dedicated" else "Shared"
 
 
 # ---------- Block device price components ----------
 
 def _bd_size(raw: Dict[str, Any]) -> Decimal:
-    # Support both "size" (instance) and "volume_size" (LC/LT) shapes
+    # Support both "size" (instance) and "volume_size" (LC/LT) shapes; default to 8GB
     if "size" in raw:
         return _to_decimal(raw.get("size"), Decimal(DEFAULT_VOLUME_SIZE))
     return _to_decimal(raw.get("volume_size"), Decimal(DEFAULT_VOLUME_SIZE))
@@ -39,7 +46,6 @@ class Ec2BlockDeviceGB(BaseAwsPriceComponent):
             Filter(key="productFamily", value="Storage"),
             Filter(key="volumeApiName", value="gp2"),
         ]
-        # Accept both volume_type (instance/LT/LC) and type (older shapes) -> volumeApiName
         self.value_mappings = [
             ValueMapping(from_key="volume_type", to_key="volumeApiName"),
             ValueMapping(from_key="type",        to_key="volumeApiName"),
@@ -97,7 +103,7 @@ class Ec2InstanceHours(BaseAwsPriceComponent):
         ]
         self.value_mappings = [
             ValueMapping(from_key="instance_type", to_key="instanceType"),
-            ValueMapping(from_key="tenancy",       to_key="tenancy"),
+            ValueMapping(from_key="tenancy", to_key="tenancy", map_func=_normalize_tenancy),
         ]
 
 
@@ -110,15 +116,20 @@ class Ec2Instance(BaseAwsResource):
         # Price components
         self._set_price_components([Ec2InstanceHours("Instance hours", self)])
 
-        # Subresources: handle absent or differently-shaped blocks safely
+        # Subresources
         subs: List[BaseAwsResource] = []
 
-        # root_block_device: can be dict or list-of-dict or missing
+        # root_block_device:
+        # - dict → use as-is
+        # - list with first dict → use first
+        # - missing/empty → add an empty dict so GB component defaults to 8GB
         rbd = self.raw_values().get("root_block_device")
         if isinstance(rbd, dict) and rbd:
             subs.append(Ec2BlockDevice(f"{self.address()}.root_block_device", self.region(), rbd))
         elif isinstance(rbd, list) and rbd and isinstance(rbd[0], dict):
             subs.append(Ec2BlockDevice(f"{self.address()}.root_block_device", self.region(), rbd[0]))
+        else:
+            subs.append(Ec2BlockDevice(f"{self.address()}.root_block_device", self.region(), {}))
 
         # ebs_block_device: may be missing/None or list-of-dict
         ebs_list = self.raw_values().get("ebs_block_device") or []

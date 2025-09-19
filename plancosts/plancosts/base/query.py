@@ -1,8 +1,7 @@
 """
 GraphQL query build/run utilities.
 
-This mirrors the Go refactor:
-- Introduces a QueryRunner (GraphQLQueryRunner) with an explicit endpoint.
+- GraphQLQueryRunner with an explicit endpoint.
 - Batches queries for a resource and its sub-resources.
 - Returns a map keyed by (resource -> price_component -> result).
 """
@@ -13,11 +12,10 @@ import urllib.request
 import urllib.error
 from typing import Dict, List, Tuple, Any
 import logging
+
 from plancosts.base.filters import Filter
 from plancosts.base.resource import Resource, PriceComponent
 from plancosts.config import PRICE_LIST_API_ENDPOINT
-
-# ---- Public API -----------------------------------------------------------------
 
 
 class GraphQLQueryRunner:
@@ -26,8 +24,7 @@ class GraphQLQueryRunner:
 
     def run_queries(self, resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
         keys, queries = self._batch(resource)
-        logging.debug("Getting pricing details from %s for %s",
-                      self.endpoint, resource.address())
+        logging.debug("Getting pricing details from %s for %s", self.endpoint, resource.address())
         results = self._get_query_results(queries) if queries else []
         return self._unpack(keys, results)
 
@@ -70,15 +67,11 @@ class GraphQLQueryRunner:
         queries: List[Dict[str, Any]] = []
 
         for pc in resource.price_components():
-            if pc.skip_query():
-                continue
             keys.append((resource, pc))
             queries.append(self._build_query(pc.filters()))
 
         for sub in resource.sub_resources():
             for pc in sub.price_components():
-                if pc.skip_query():
-                    continue
                 keys.append((sub, pc))
                 queries.append(self._build_query(pc.filters()))
 
@@ -94,6 +87,7 @@ class GraphQLQueryRunner:
             r, pc = keys[i]
             out.setdefault(r, {})[pc] = res
         return out
+
 
 def extract_price_from_result(result: Any) -> str:
     try:
