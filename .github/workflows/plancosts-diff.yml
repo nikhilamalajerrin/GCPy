@@ -117,7 +117,7 @@ jobs:
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
-        if: always()  # Run even if previous steps fail, for visibility
+        if: always() 
         shell: bash
         run: |
           echo "Posting PR comment..."
