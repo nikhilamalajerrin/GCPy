@@ -1,0 +1,14 @@
+name: 'Run plancosts'
+description: 'Runs plancosts and outputs table + monthly total'
+inputs:
+  file_prefix:
+    description: 'Prefix for output files (e.g. master or pull_request)'
+    required: true
+outputs:
+  monthly_cost:
+    description: 'Extracted monthly cost from table output (OVERALL TOTAL)'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.file_prefix }}

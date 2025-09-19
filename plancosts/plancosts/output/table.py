@@ -27,9 +27,8 @@ def _render(rows: List[List[str]]) -> str:
     out += [line.format(*r) for r in rows]
     return "\n".join(out)
 
-def to_table(breakdowns: Any) -> str:
+def to_table(breakdowns: Any, no_color: bool = False) -> str:
     data: List[Dict[str, Any]] = json.loads(to_json(breakdowns))
-
     rows: List[List[str]] = []
     overall_h = Decimal("0")
     overall_m = Decimal("0")
