@@ -1,0 +1,74 @@
+name: plancosts diff
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '.github/workflows/plancosts-diff.yml'
+      - 'main.py'
+      - 'plancosts/**'
+
+jobs:
+  cost-diff:
+    runs-on: ubuntu-latest
+    env:
+      # <<< EDIT THIS >>> the path to your Terraform directory in the repo
+      TERRAFORM_DIR: examples/terraform_0_13
+      # Optional: your pricing API
+      PLANCOSTS_API_URL: http://127.0.0.1:4000/
+
+    steps:
+      # 1) Checkout master into ./master
+      - name: Checkout master branch
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: master
+
+      # 2) Checkout PR head into ./pull_request
+      - name: Checkout pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pull_request
+
+      # 3) Run plancosts on master
+      - name: Run plancosts on master
+        id: master_cost
+        uses: ./master/.github/actions/plancosts
+        with:
+          file_prefix: master
+        env:
+          TERRAFORM_DIR: ${{ env.TERRAFORM_DIR }}
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+
+      # 4) Run plancosts on PR
+      - name: Run plancosts on PR
+        id: pr_cost
+        uses: ./pull_request/.github/actions/plancosts
+        with:
+          file_prefix: pull_request
+        env:
+          TERRAFORM_DIR: ${{ env.TERRAFORM_DIR }}
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+
+      # 5) Show diff and comment (only if totals differ)
+      - name: Add PR comment with cost diff
+        if: steps.master_cost.outputs.monthly_cost != steps.pr_cost.outputs.monthly_cost
+        run: |
+          cd /github/workspace
+          # Use plain diff, ignore the first 2 header lines like the Go example
+          diff -u master-plancosts.txt pull_request-plancosts.txt | tail -n +3 > diff.txt || true
+
+          body=$(
+            jq -Mnc \
+              --arg old "${{ steps.master_cost.outputs.monthly_cost }}" \
+              --arg new "${{ steps.pr_cost.outputs.monthly_cost }}" \
+              --arg diff "$(< diff.txt)" \
+              '{body: "Master monthly cost: $\($old)\nPR monthly cost: $\($new)\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}'
+          )
+          curl -sL -X POST -d "$body" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
