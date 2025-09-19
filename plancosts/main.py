@@ -2,11 +2,12 @@
 """
 Main entry point for plancosts - Generate cost reports from Terraform plans.
 
-Matches the Go CLI UX from commit 36a4950:
-- Supports --tfplan-json OR (--tfplan with --tfdir) OR just --tfdir
+Renamed flag: --tfplan-json -> --tfjson (keeps --tfplan-json as an alias).
+
+Matches the Go CLI UX:
+- Supports --tfjson OR (--tfplan with --tfdir) OR just --tfdir
 - Prints validation errors in bright red
-- Uses a GraphQL QueryRunner; endpoint from --api-url or env (PLANCOSTS_API_URL),
-  falling back to config default (and supports legacy env), via resolve_endpoint()
+- Uses a GraphQL QueryRunner, endpoint from --api-url or env (PLANCOSTS_API_URL)
 - Defaults to table output; supports --output json
 """
 from __future__ import annotations
@@ -17,7 +18,7 @@ import json
 import logging
 import click
 
-# Optional: load .env / .env.local; safe even if files are missing.
+# Optional: load .env / .env.local
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
     load_dotenv(".env.local")
@@ -32,13 +33,12 @@ from plancosts.parsers.terraform import (
 )
 from plancosts.base.costs import get_cost_breakdowns
 from plancosts.base.query import GraphQLQueryRunner
-from plancosts.config import resolve_endpoint, PRICE_LIST_API_ENDPOINT
+from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table
 
 
 def _fail(msg: str, ctx: click.Context | None = None) -> None:
-    """Print a bright red error then exit; optionally show help."""
     click.secho(msg, fg="bright_red", err=True)
     if ctx is not None:
         click.echo(ctx.get_help(), err=True)
@@ -47,9 +47,11 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option(
-    "--tfplan-json",
+    "--tfjson",
+    "--tfplan-json",  # deprecated alias kept for back-compat
+    "tfjson",
     type=click.Path(exists=False, dir_okay=False, readable=True),
-    help="Path to Terraform plan JSON file (from `terraform show -json`).",
+    help="Path to Terraform plan JSON file (from `terraform show -json`). (alias: --tfplan-json)",
 )
 @click.option(
     "--tfplan",
@@ -81,7 +83,7 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
     help="Verbose logging.",
 )
 def main(
-    tfplan_json: str | None,
+    tfjson: str | None,
     tfplan: str | None,
     tfdir: str | None,
     api_url: str | None,
@@ -96,28 +98,28 @@ def main(
 
     ctx = click.get_current_context()
 
-    # Validation (mirror Go CLI messages)
-    if tfplan_json and tfplan:
+    # Validation (match Go messages)
+    if tfjson and tfplan:
         _fail(
-            "Please only provide one of either a Terraform Plan JSON file (--tfplan-json) or a Terraform Plan file (--tfplan).",
+            "Please only provide one of either a Terraform Plan JSON file (tfjson) or a Terraform Plan file (tfplan)",
             ctx,
         )
 
     if tfplan and not tfdir:
         _fail(
-            "Please provide a path to the Terraform project (--tfdir) if providing a Terraform Plan file (--tfplan)\n",
+            "Please provide a path to the Terrafrom project (tfdir) if providing a Terraform Plan file (tfplan)\n",
             ctx,
         )
 
-    if not tfplan_json and not tfdir:
+    if not tfjson and not tfdir:
         _fail(
-            "Please provide either the path to the Terraform project (--tfdir) or a Terraform Plan JSON file (--tfplan-json).",
+            "Please provide either the path to the Terrafrom project (tfdir) or a Terraform Plan JSON file (tfjson).",
             ctx,
         )
 
-    # Existence checks (so errors are ours and red)
-    if tfplan_json and not os.path.isfile(tfplan_json):
-        _fail(f"File not found: --tfplan-json '{tfplan_json}'")
+    # Existence checks
+    if tfjson and not os.path.isfile(tfjson):
+        _fail(f"File not found: --tfjson '{tfjson}'")
 
     if tfplan and not os.path.isfile(tfplan):
         _fail(f"File not found: --tfplan '{tfplan}'")
@@ -127,8 +129,8 @@ def main(
 
     try:
         # Get plan JSON
-        if tfplan_json:
-            plan_json = load_plan_json(tfplan_json)
+        if tfjson:
+            plan_json = load_plan_json(tfjson)
         else:
             # Either: (tfdir only) OR (tfplan + tfdir)
             plan_json = generate_plan_json(tfdir, tfplan)
@@ -139,25 +141,20 @@ def main(
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
-        # Build endpoint:
-        # - --api-url overrides env/config/legacy
-        # - resolve_endpoint normalizes and appends /graphql if missing
-        endpoint = resolve_endpoint(api_url) if api_url else PRICE_LIST_API_ENDPOINT
+        # Build endpoint: --api-url overrides; ensure /graphql suffix
+        endpoint = f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
         runner = GraphQLQueryRunner(endpoint)
 
-        # Compute cost breakdowns (runner + resources)
+        # Compute cost breakdowns
         breakdowns = get_cost_breakdowns(runner, resources)
 
-        # Render output
+        # Render
         if output.lower() == "json":
             click.echo(to_json(breakdowns))
         else:
             click.echo(to_table(breakdowns))
 
     except FileNotFoundError as e:
-        # Friendly note if the terraform CLI isn't found during generate_plan_json
-        if "terraform" in str(e).lower():
-            _fail("Error: Terraform CLI not found. Please install Terraform and ensure it's on your PATH.")
         _fail(f"Error: File not found: {e}")
     except json.JSONDecodeError as e:
         _fail(f"Error: Invalid JSON: {e}")
