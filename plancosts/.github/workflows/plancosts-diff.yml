@@ -1,6 +1,7 @@
 name: plancosts diff
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - '**/*.tf'
@@ -10,83 +11,83 @@ on:
       - 'plancosts/**'
 
 env:
-  TERRAFORM_DIR: examples/terraform_0.13
+  # <<< EDIT THIS if needed >>>
+  TERRAFORM_DIR: examples/terraform_0_13
+  # Use a reachable API for GitHub runners. If you want the mock, we start it below.
   PLANCOSTS_API_URL: http://127.0.0.1:4000/
 
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repo (default branch)
         uses: actions/checkout@v4
+
+      - name: Checkout master into ./master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: master
+
+      - name: Checkout PR head into ./pull_request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pull_request
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install Python deps
         run: |
           python -m pip install -U pip
           pip install -r requirements.txt
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
 
       - name: Start mock pricing API (background)
         run: |
           nohup python mock_pricing_api.py > /tmp/mock.log 2>&1 &
           sleep 2
-          curl -sSf http://127.0.0.1:4000/ || true  # sanity ping
+          curl -sSf http://127.0.0.1:4000/ || true
 
-    steps:
-      # 1) Checkout master into ./master
-      - name: Checkout master branch
-        uses: actions/checkout@v4
-        with:
-          ref: master
-          path: master
-
-      # 2) Checkout PR head into ./pull_request
-      - name: Checkout pull request branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pull_request
-
-      # 3) Run plancosts on master
+      # ---- Run plancosts on master ----
       - name: Run plancosts on master
-        id: master_cost
-        uses: ./master/.github/actions/plancosts
-        with:
-          file_prefix: master
+        working-directory: master
         env:
-          TERRAFORM_DIR: ${{ env.TERRAFORM_DIR }}
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-
-      # 4) Run plancosts on PR
-      - name: Run plancosts on PR
-        id: pr_cost
-        uses: ./pull_request/.github/actions/plancosts
-        with:
-          file_prefix: pull_request
-        env:
-          TERRAFORM_DIR: ${{ env.TERRAFORM_DIR }}
-          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-
-      # 5) Show diff and comment (only if totals differ)
-      - name: Add PR comment with cost diff
-        if: steps.master_cost.outputs.monthly_cost != steps.pr_cost.outputs.monthly_cost
         run: |
-          cd /github/workspace
-          # Use plain diff, ignore the first 2 header lines like the Go example
-          diff -u master-plancosts.txt pull_request-plancosts.txt | tail -n +3 > diff.txt || true
+          python ../main.py --tfpath ${{ env.TERRAFORM_DIR }} -o table | tee ../master-plancosts.txt
 
-          body=$(
-            jq -Mnc \
-              --arg old "${{ steps.master_cost.outputs.monthly_cost }}" \
-              --arg new "${{ steps.pr_cost.outputs.monthly_cost }}" \
-              --arg diff "$(< diff.txt)" \
-              '{body: "Master monthly cost: $\($old)\nPR monthly cost: $\($new)\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}'
-          )
-          curl -sL -X POST -d "$body" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+      # ---- Run plancosts on PR ----
+      - name: Run plancosts on PR
+        working-directory: pull_request
+        env:
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+        run: |
+          python ../main.py --tfpath ${{ env.TERRAFORM_DIR }} -o table | tee ../pull_request-plancosts.txt
+
+      # ---- Diff + PR comment ----
+      - name: Add PR comment with cost diff
+        run: |
+          # Extract totals
+          master_total=$(awk '/^OVERALL TOTAL/ {print $NF}' master-plancosts.txt)
+          pr_total=$(awk '/^OVERALL TOTAL/ {print $NF}' pull_request-plancosts.txt)
+
+          if [ "$master_total" != "$pr_total" ]; then
+            diff -u master-plancosts.txt pull_request-plancosts.txt | tail -n +3 > diff.txt || true
+            body=$(jq -Mnc --arg old "$master_total" --arg new "$pr_total" --arg diff "$(< diff.txt)" \
+              '{body: "Master monthly cost: $\($old)\nPR monthly cost: $\($new)\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
+            curl -sL -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -d "$body" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+          else
+            echo "Totals are equal ($master_total). No comment posted."
+          fi
