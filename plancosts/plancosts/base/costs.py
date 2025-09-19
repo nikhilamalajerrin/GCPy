@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
-
+import logging  
 from plancosts.base.resource import Resource, PriceComponent
 from plancosts.base.query import GraphQLQueryRunner, extract_price_from_result
 
@@ -67,13 +67,17 @@ def _pc_cost(pc: PriceComponent) -> PriceComponentCost:
     return PriceComponentCost(pc, hourly, monthly)
 
 def _breakdown_for(resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
+    # sort price components by name for stable diffs
     pcs: List[PriceComponentCost] = []
-    for pc in resource.price_components():
+    for pc in sorted(resource.price_components(), key=lambda p: p.name()):
         if pc in results_map.get(resource, {}):
-            pcs.append(_pc_cost(pc))
+            hourly = pc.hourly_cost()
+            monthly = _round6(hourly * HOURS_IN_MONTH)
+            pcs.append(PriceComponentCost(pc, hourly, monthly))
 
+    # sort sub-resources by address for stable diffs
     subs: List[ResourceCostBreakdown] = []
-    for sub in resource.sub_resources():
+    for sub in sorted(resource.sub_resources(), key=lambda r: r.address()):
         if results_map.get(sub):
             subs.append(_breakdown_for(sub, results_map))
 
@@ -121,7 +125,7 @@ def generate_cost_breakdowns(
 
     # Build breakdowns
     out: List[ResourceCostBreakdown] = []
-    for r in resources:
+    for r in sorted(resources, key=lambda rs: rs.address()):
         if not r.has_cost():
             continue
         out.append(_breakdown_for(r, all_results))

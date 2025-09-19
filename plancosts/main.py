@@ -9,6 +9,8 @@ Matches the Go CLI UX:
 - Prints validation errors in bright red
 - Uses a GraphQL QueryRunner, endpoint from --api-url or env (PLANCOSTS_API_URL)
 - Defaults to table output; supports --output json
+- NEW: --no-color (turn off colored output; our renderer is ASCII-only so this
+       simply guarantees no ANSI escapes appear if future formatting is added)
 """
 from __future__ import annotations
 
@@ -82,6 +84,11 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
     is_flag=True,
     help="Verbose logging.",
 )
+@click.option(
+    "--no-color",
+    is_flag=True,
+    help="Turn off colored output.",
+)
 def main(
     tfjson: str | None,
     tfplan: str | None,
@@ -89,6 +96,7 @@ def main(
     api_url: str | None,
     output: str,
     verbose: bool,
+    no_color: bool,
 ) -> None:
     """Generate cost reports from Terraform plans."""
     logging.basicConfig(
@@ -152,7 +160,7 @@ def main(
         if output.lower() == "json":
             click.echo(to_json(breakdowns))
         else:
-            click.echo(to_table(breakdowns))
+            click.echo(to_table(breakdowns, no_color=no_color))
 
     except FileNotFoundError as e:
         _fail(f"Error: File not found: {e}")
