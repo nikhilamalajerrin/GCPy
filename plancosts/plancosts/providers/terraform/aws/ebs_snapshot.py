@@ -4,7 +4,7 @@ Typed AWS EBS Snapshot resources (aws_terraform).
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from plancosts.base.filters import Filter
 from .base import BaseAwsResource, BaseAwsPriceComponent, _to_decimal, DEFAULT_VOLUME_SIZE
@@ -21,8 +21,8 @@ class EbsSnapshotGB(BaseAwsPriceComponent):
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="Storage Snapshot"),
-            # Infracost 149bbf8: use REGEX for usagetype
-            Filter(key="usagetype", value="/EBS:SnapshotUsage/", operation="REGEX"),
+            # Commit 8d1b805: anchor to end so we don't match ...UnderBilling
+            Filter(key="usagetype", value="/EBS:SnapshotUsage$/", operation="REGEX"),
         ]
 
     def hourly_cost(self) -> Decimal:
