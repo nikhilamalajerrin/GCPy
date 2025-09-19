@@ -1,122 +1,76 @@
-# plancosts/outputs/table.py
+"""
+ASCII table rendering that mirrors the Go output.
+"""
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import List, Dict, Any
-
-from plancosts.output.json import to_json  # reuse the stable JSON layout
+from typing import Any, Dict, List
 import json
 
+from plancosts.output.json import to_json
 
-def _fmt_decimal(val: Decimal | float | int, fmt: str = "{:.4f}") -> str:
-    # ensure Decimal-friendly formatting but accept floats too
-    if isinstance(val, Decimal):
-        return fmt.format(float(val))
+def _fmt(val: Decimal | float | int, pattern: str = "{:.4f}") -> str:
     try:
-        return fmt.format(float(val))
+        return pattern.format(float(val))
     except Exception:
         return str(val)
 
-
-def _line_prefix(i: int, total: int) -> str:
+def _branch(i: int, total: int) -> str:
     return "└─" if i == total else "├─"
 
-
-def _render_table(rows: List[List[str]]) -> str:
-    # simple left/right columns with minimal styling; no third-party libs
-    # columns: NAME (left), HOURLY (right), MONTHLY (right)
-    name_w = max((len(r[0]) for r in rows), default=4)
+def _render(rows: List[List[str]]) -> str:
+    name_w   = max((len(r[0]) for r in rows), default=4)
     hourly_w = max((len(r[1]) for r in rows), default=11)
-    monthly_w = max((len(r[2]) for r in rows), default=12)
+    month_w  = max((len(r[2]) for r in rows), default=12)
+    line = f"{{:<{name_w}}}  {{:>{hourly_w}}}  {{:>{month_w}}}"
+    out = [line.format("NAME", "HOURLY COST", "MONTHLY COST")]
+    out += [line.format(*r) for r in rows]
+    return "\n".join(out)
 
-    out_lines = []
-    header = ["NAME", "HOURLY COST", "MONTHLY COST"]
-    header_fmt = f"{{:<{name_w}}}  {{:>{hourly_w}}}  {{:>{monthly_w}}}"
-    out_lines.append(header_fmt.format(*header))
+def to_table(breakdowns: Any) -> str:
+    data: List[Dict[str, Any]] = json.loads(to_json(breakdowns))
 
-    for name, hourly, monthly in rows:
-        out_lines.append(header_fmt.format(name, hourly, monthly))
-
-    return "\n".join(out_lines)
-
-
-def to_table(resource_cost_breakdowns: Any) -> str:
-    """
-    Render the same tree-style table as the Go commit:
-    - Resource title row
-    - Child rows for each price component (with ├─/└─)
-    - Includes subresource line items
-    - Per-resource total and an overall total
-    """
-    # Normalize via JSON serializer we already trust
-    # to_json() returns a JSON string; parse it to a dict we can walk.
-    data: List[Dict[str, Any]] = json.loads(to_json(resource_cost_breakdowns))
-
-    all_rows: List[List[str]] = []
-    overall_hourly = Decimal("0")
-    overall_monthly = Decimal("0")
+    rows: List[List[str]] = []
+    overall_h = Decimal("0")
+    overall_m = Decimal("0")
 
     for res in data:
-        resource_name = res.get("resource", "")
-        all_rows.append([resource_name, "", ""])
+        title = res.get("resource", "")
+        rows.append([title, "", ""])
 
-        # Count total line items (resource-level + subresources)
-        line_items = res.get("breakdown", [])[:]
-        sub_list = res.get("subresources", []) or []
-        for sub in sub_list:
-            line_items.extend(sub.get("breakdown", []))
-        total_items = len(line_items)
+        # flatten items to compute totals/order
+        items = list(res.get("breakdown", []))
+        for sub in res.get("subresources", []) or []:
+            items.extend(sub.get("breakdown", []))
+        total_items = len(items)
 
         i = 0
-        total_hourly = Decimal("0")
-        total_monthly = Decimal("0")
+        th = Decimal("0")
+        tm = Decimal("0")
 
-        # resource-level components
         for pc in res.get("breakdown", []):
             i += 1
-            hourly = Decimal(str(pc.get("hourlyCost", 0)))
-            monthly = Decimal(str(pc.get("monthlyCost", 0)))
-            total_hourly += hourly
-            total_monthly += monthly
-            all_rows.append([
-                f"{_line_prefix(i, total_items)} {pc.get('priceComponent','')}",
-                _fmt_decimal(hourly),
-                _fmt_decimal(monthly),
-            ])
+            h = Decimal(str(pc.get("hourlyCost", 0)))
+            m = Decimal(str(pc.get("monthlyCost", 0)))
+            th += h
+            tm += m
+            rows.append([f"{_branch(i, total_items)} {pc.get('priceComponent','')}", _fmt(h), _fmt(m)])
 
-        # sub-resources
-        for sub in sub_list:
-            sub_addr = sub.get("resource", "")
-            # shorten label like Go code (show portion after "<parent>.")
-            short = sub_addr.replace(f"{resource_name}.", "", 1)
+        for sub in res.get("subresources", []) or []:
+            short = sub.get("resource", "").replace(f"{title}.", "", 1)
             for pc in sub.get("breakdown", []):
                 i += 1
-                hourly = Decimal(str(pc.get("hourlyCost", 0)))
-                monthly = Decimal(str(pc.get("monthlyCost", 0)))
-                total_hourly += hourly
-                total_monthly += monthly
-                all_rows.append([
-                    f"{_line_prefix(i, total_items)} {short} {pc.get('priceComponent','')}",
-                    _fmt_decimal(hourly),
-                    _fmt_decimal(monthly),
-                ])
+                h = Decimal(str(pc.get("hourlyCost", 0)))
+                m = Decimal(str(pc.get("monthlyCost", 0)))
+                th += h
+                tm += m
+                rows.append([f"{_branch(i, total_items)} {short} {pc.get('priceComponent','')}", _fmt(h), _fmt(m)])
 
-        # totals for this resource
-        all_rows.append([
-            "Total",
-            _fmt_decimal(total_hourly),
-            _fmt_decimal(total_monthly),
-        ])
-        all_rows.append(["", "", ""])  # blank spacer
+        rows.append(["Total", _fmt(th), _fmt(tm)])
+        rows.append(["", "", ""])
 
-        overall_hourly += total_hourly
-        overall_monthly += total_monthly
+        overall_h += th
+        overall_m += tm
 
-    # overall total
-    all_rows.append([
-        "OVERALL TOTAL",
-        _fmt_decimal(overall_hourly),
-        _fmt_decimal(overall_monthly),
-    ])
-
-    return _render_table(all_rows)
+    rows.append(["OVERALL TOTAL", _fmt(overall_h), _fmt(overall_m)])
+    return _render(rows)

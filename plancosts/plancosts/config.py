@@ -1,32 +1,30 @@
-# plancosts/config/config.py
+"""
+Lightweight config loader (dotenv optional).
+
+Mirrors the Go change that made loading .env/.env.local safe if files
+don’t exist. Exposes PRICE_LIST_API_ENDPOINT for the query runner.
+"""
 from __future__ import annotations
+
 import os
-import logging
+from pathlib import Path
 
-try:
-    from dotenv import load_dotenv  # pip install python-dotenv
-except Exception:  # pragma: no cover
-    load_dotenv = None
+def _safe_load_dotenv(path: str) -> None:
+    try:
+        p = Path(path)
+        if p.exists() and p.is_file():
+            from dotenv import load_dotenv  # optional dependency
+            load_dotenv(p)
+    except Exception:
+        # Don’t crash if dotenv isn’t installed or loading fails.
+        pass
 
-log = logging.getLogger(__name__)
+# Load .env.local then .env if present (no errors if missing)
+_safe_load_dotenv(".env.local")
+_safe_load_dotenv(".env")
 
-def _safe_load_env(path: str) -> None:
-    """Load a dotenv file if it exists; never raise if it doesn't."""
-    if not load_dotenv:
-        return
-    if os.path.isfile(path):
-        try:
-            # Keep existing env values; only fill missing ones
-            load_dotenv(path, override=False)
-        except Exception as e:  # mirror Go code’s “log.Fatal” semantics with a warning
-            log.warning("Failed to load %s: %s", path, e)
-
-# Load .env.local then .env (if they exist)
-_safe_load_env(".env.local")
-_safe_load_env(".env")
-
-# Public config values (with sane defaults)
-PRICE_LIST_API_ENDPOINT = os.getenv(
+# Public config values
+PRICE_LIST_API_ENDPOINT: str = os.getenv(
     "PLAN_COSTS_PRICE_LIST_API_ENDPOINT",
-    "http://localhost:4000/graphql",
+    "http://127.0.0.1:4000/graphql",
 )

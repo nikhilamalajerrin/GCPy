@@ -2,9 +2,10 @@
 """
 Main entry point for plancosts - Generate cost reports from Terraform plans.
 
-This version matches the Go CLI UX:
+This mirrors the Go CLI UX from commit 011ec3a:
 - Supports --tfplan-json OR (--tfplan with --tfpath) OR just --tfpath
-- Prints argument/validation errors in bright red (like color.HiRed in Go)
+- Prints validation errors in bright red
+- Uses a GraphQL QueryRunner (endpoint from config) to fetch prices
 - Defaults to table output; supports --output json
 """
 
@@ -16,7 +17,7 @@ import json
 import logging
 import click
 
-# Optional: load .env / .env.local like the Go version
+# Optional: load .env / .env.local; safe even if files are missing.
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
     load_dotenv(".env.local")
@@ -30,6 +31,8 @@ from plancosts.parsers.terraform import (
     parse_plan_json,
 )
 from plancosts.base.costs import get_cost_breakdowns
+from plancosts.base.query import GraphQLQueryRunner
+from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table
 
@@ -84,7 +87,6 @@ def main(
     verbose: bool,
 ) -> None:
     """Generate cost reports from Terraform plans."""
-    # Logging
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s: %(message)s",
@@ -92,7 +94,7 @@ def main(
 
     ctx = click.get_current_context()
 
-    # Argument validation (mirror Go CLI messages, but red)
+    # Validation (mirror Go CLI messages)
     if tfplan_json and tfplan:
         _fail(
             "Please only provide one of either a Terraform Plan JSON file (--tfplan-json) or a Terraform Plan file (--tfplan).",
@@ -111,7 +113,7 @@ def main(
             ctx,
         )
 
-    # Existence checks so errors are ours (and red), not Click's
+    # Existence checks (so errors are ours and red)
     if tfplan_json and not os.path.isfile(tfplan_json):
         _fail(f"File not found: --tfplan-json '{tfplan_json}'")
 
@@ -122,7 +124,7 @@ def main(
         _fail(f"Directory not found: --tfpath '{tfpath}'")
 
     try:
-        # Acquire plan JSON
+        # Get plan JSON
         if tfplan_json:
             plan_json = load_plan_json(tfplan_json)
         else:
@@ -135,8 +137,11 @@ def main(
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
-        # Compute cost breakdowns
-        breakdowns = get_cost_breakdowns(resources)
+        # NEW: use a GraphQLQueryRunner (like Go's NewGraphQLQueryRunner)
+        runner = GraphQLQueryRunner(PRICE_LIST_API_ENDPOINT)
+
+        # Compute cost breakdowns (runner + resources)
+        breakdowns = get_cost_breakdowns(runner, resources)
 
         # Render output
         if output.lower() == "json":

@@ -1,65 +1,92 @@
-"""
-Cost calculation on top of the refactored model.
-"""
+# plancosts/base/costs.py
 from __future__ import annotations
-from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any, Dict, List, Optional
+
 from plancosts.base.resource import Resource, PriceComponent
-from plancosts.base.query import run_queries, extract_price_from_result
+from plancosts.base.query import GraphQLQueryRunner, extract_price_from_result
 
 HOURS_IN_MONTH = Decimal(730)
-
-class PriceComponentCost:
-    def __init__(self, price_component: PriceComponent, hourly_cost: Decimal, monthly_cost: Decimal):
-        self.price_component = price_component
-        self.hourly_cost = hourly_cost
-        self.monthly_cost = monthly_cost
-
-class ResourceCostBreakdown:
-    def __init__(self, resource: Resource, price_component_costs: List[PriceComponentCost], sub_resource_costs: List["ResourceCostBreakdown"] | None = None):
-        self.resource = resource
-        self.price_component_costs = price_component_costs
-        self.sub_resource_costs = sub_resource_costs or []
 
 def _round6(d: Decimal) -> Decimal:
     return d.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
-def _set_price(pc: PriceComponent, result: Any) -> None:
+@dataclass
+class PriceComponentCost:
+    price_component: PriceComponent
+    hourly_cost: Decimal
+    monthly_cost: Decimal
+
+@dataclass
+class ResourceCostBreakdown:
+    resource: Resource
+    price_component_costs: List[PriceComponentCost]
+    sub_resource_costs: List["ResourceCostBreakdown"]
+
+def _set_price_from_query(pc: PriceComponent, result: Any) -> None:
     price = Decimal(extract_price_from_result(result))
     pc.set_price(price)
 
-def _pc_cost(pc: PriceComponent, result: Any) -> PriceComponentCost:
+def _pc_cost(pc: PriceComponent) -> PriceComponentCost:
     hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(pc, hourly, monthly)
 
 def _breakdown_for(resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
-    pc_costs: List[PriceComponentCost] = []
+    pcs: List[PriceComponentCost] = []
     for pc in resource.price_components():
-        result = results_map.get(resource, {}).get(pc)
-        if result is not None:
-            pc_costs.append(_pc_cost(pc, result))
+        if pc in results_map.get(resource, {}):
+            pcs.append(_pc_cost(pc))
 
-    sub_costs: List[ResourceCostBreakdown] = []
+    subs: List[ResourceCostBreakdown] = []
     for sub in resource.sub_resources():
-        sub_results = results_map.get(sub, {})
-        if sub_results:
-            sub_costs.append(_breakdown_for(sub, results_map))
+        if results_map.get(sub):
+            subs.append(_breakdown_for(sub, results_map))
 
-    return ResourceCostBreakdown(resource, pc_costs, sub_costs)
+    return ResourceCostBreakdown(resource, pcs, subs)
 
-def generate_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
-    # 1) Run all queries and set prices on components
-    all_results: Dict[Resource, Dict[PriceComponent, Any]] = {}
-    for r in resources:
-        res = run_queries(r)
-        # set prices immediately
-        for rr, pcs in res.items():
-            for pc, result in pcs.items():
-                _set_price(pc, result)
-        all_results.update(res)
+# ---- Compatibility shim expected by tests -------------------------------------
+# Tests monkeypatch costs_mod.run_queries, so keep this symbol at module scope.
+def run_queries(resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
+    """Default runner-based implementation; test can monkeypatch this."""
+    return GraphQLQueryRunner().run_queries(resource)
 
-    # 2) Build breakdowns only for costable resources
+# ---- Flexible API: supports both (resources) and (runner, resources) ----------
+
+def generate_cost_breakdowns(
+    runner_or_resources,  # GraphQLQueryRunner | List[Resource]
+    maybe_resources: Optional[List[Resource]] = None,
+) -> List[ResourceCostBreakdown]:
+    """
+    Supports:
+      - generate_cost_breakdowns(resources)
+      - generate_cost_breakdowns(runner, resources)
+    The first form uses the module-level run_queries() so tests can monkeypatch it.
+    """
+    # Determine call style
+    if maybe_resources is None:
+        resources: List[Resource] = runner_or_resources  # type: ignore[assignment]
+        # Use shim so monkeypatch works
+        all_results: Dict[Resource, Dict[PriceComponent, Any]] = {}
+        for r in resources:
+            rmap = run_queries(r)
+            for rr, pcs in rmap.items():
+                for pc, result in pcs.items():
+                    _set_price_from_query(pc, result)
+            all_results.update(rmap)
+    else:
+        runner: GraphQLQueryRunner = runner_or_resources  # type: ignore[assignment]
+        resources = maybe_resources
+        all_results = {}
+        for r in resources:
+            rmap = runner.run_queries(r)
+            for rr, pcs in rmap.items():
+                for pc, result in pcs.items():
+                    _set_price_from_query(pc, result)
+            all_results.update(rmap)
+
+    # Build breakdowns
     out: List[ResourceCostBreakdown] = []
     for r in resources:
         if not r.has_cost():
@@ -67,6 +94,9 @@ def generate_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBrea
         out.append(_breakdown_for(r, all_results))
     return out
 
-# Backward-compatible alias for your existing main.py
-def get_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]:
-    return generate_cost_breakdowns(resources)
+# Backward-compatible alias used by main.py
+def get_cost_breakdowns(
+    runner_or_resources,
+    maybe_resources: Optional[List[Resource]] = None,
+) -> List[ResourceCostBreakdown]:
+    return generate_cost_breakdowns(runner_or_resources, maybe_resources)
