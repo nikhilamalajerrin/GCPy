@@ -1,148 +1,146 @@
-{
-    "format_version": "0.1",
-    "terraform_version": "0.14.0",
-    "configuration": {
-      "provider_config": {
-        "aws": {
-          "expressions": {
-            "region": { "constant_value": "us-east-1" }
-          }
+{  "format_version": "0.1",
+  "terraform_version": "0.14.0",
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "expressions": {
+          "region": { "constant_value": "us-east-1" }
         }
-      },
-      "root_module": {
-        "resources": [
-          { "address": "aws_instance.example", "expressions": {} },
-          { "address": "aws_ebs_volume.data1", "expressions": {} },
-          {
-            "address": "aws_ebs_snapshot.snap1",
-            "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
-          },
-          {
-            "address": "aws_ebs_snapshot_copy.copy1",
-            "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
-          },
-          { "address": "aws_launch_configuration.lc1", "expressions": {} },
-          {
-            "address": "aws_autoscaling_group.asg1",
-            "expressions": { "launch_configuration": { "references": ["aws_launch_configuration.lc1"] } }
-          },
-          { "address": "aws_elb.elb1", "expressions": {} },
-          {
-            "address": "aws_lb.alb1",
-            "expressions": {
-              "load_balancer_type": { "constant_value": "application" }
-            }
-          },
-          { "address": "aws_db_instance.db1", "expressions": {} },
-          { "address": "aws_eip.nat1", "expressions": {} },
-          {
-            "address": "aws_nat_gateway.nat",
-            "expressions": { "allocation_id": { "references": ["aws_eip.nat1"] } }
-          }
-        ]
       }
     },
-    "planned_values": {
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_instance.example",
-            "type": "aws_instance",
-            "values": {
-              "instance_type": "m5.large",
-              "tenancy": "default",
-              "root_block_device": [
-                { "volume_type": "gp2", "volume_size": 100 }
-              ],
-              "ebs_block_device": [
-                { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
-                { "volume_type": "gp2", "volume_size": 200 }
-              ]
-            }
-          },
-          {
-            "address": "aws_ebs_volume.data1",
-            "type": "aws_ebs_volume",
-            "values": { "type": "io1", "size": 200, "iops": 4000 }
-          },
-          {
-            "address": "aws_ebs_snapshot.snap1",
-            "type": "aws_ebs_snapshot",
-            "values": { "volume_id": "aws_ebs_volume.data1" }
-          },
-          {
-            "address": "aws_ebs_snapshot_copy.copy1",
-            "type": "aws_ebs_snapshot_copy",
-            "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
-          },
-          {
-            "address": "aws_launch_configuration.lc1",
-            "type": "aws_launch_configuration",
-            "values": {
-              "instance_type": "m5.large",
-              "placement_tenancy": "default",
-              "block_device_mappings": [
-                {
-                  "device_name": "/dev/xvdb",
-                  "ebs": [
-                    { "volume_type": "io1", "volume_size": 150, "iops": 3000 }
-                  ]
-                },
-                {
-                  "device_name": "/dev/xvdc",
-                  "ebs": [
-                    { "volume_type": "gp2", "volume_size": 500 }
-                  ]
-                }
-              ]
-            }
-          },
-          {
-            "address": "aws_autoscaling_group.asg1",
-            "type": "aws_autoscaling_group",
-            "values": {
-              "desired_capacity": 3,
-              "launch_configuration": "aws_launch_configuration.lc1"
-            }
-          },
-          {
-            "address": "aws_elb.elb1",
-            "type": "aws_elb",
-            "values": {}
-          },
-          {
-            "address": "aws_lb.alb1",
-            "type": "aws_lb",
-            "values": { "load_balancer_type": "application" }
-          },
-          {
-            "address": "aws_db_instance.db1",
-            "type": "aws_db_instance",
-            "values": {
-              "arn": "arn:aws:rds:us-west-2:123456789012:db:mydb",
-              "engine": "postgres",
-              "instance_class": "db.m5.large",
-              "multi_az": false,
-              "allocated_storage": 200,
-              "storage_type": "io1",
-              "iops": 3000
-            }
-          },
-          {
-            "address": "aws_eip.nat1",
-            "type": "aws_eip",
-            "values": { "vpc": true }
-          },
-          {
-            "address": "aws_nat_gateway.nat",
-            "type": "aws_nat_gateway",
-            "values": {
-              "allocation_id": "aws_eip.nat1",
-              "subnet_id": "subnet-123456"
-            }
+    "root_module": {
+      "resources": [
+        { "address": "aws_instance.example", "expressions": {} },
+        { "address": "aws_ebs_volume.data1", "expressions": {} },
+        {
+          "address": "aws_ebs_snapshot.snap1",
+          "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.copy1",
+          "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
+        },
+        { "address": "aws_launch_configuration.lc1", "expressions": {} },
+        {
+          "address": "aws_autoscaling_group.asg1",
+          "expressions": { "launch_configuration": { "references": ["aws_launch_configuration.lc1"] } }
+        },
+        { "address": "aws_elb.elb1", "expressions": {} },
+        {
+          "address": "aws_lb.alb1",
+          "expressions": {
+            "load_balancer_type": { "constant_value": "application" }
           }
-        ]
-      }
+        },
+        { "address": "aws_db_instance.db1", "expressions": {} },
+        { "address": "aws_eip.nat1", "expressions": {} },
+        {
+          "address": "aws_nat_gateway.nat",
+          "expressions": { "allocation_id": { "references": ["aws_eip.nat1"] } }
+        }
+      ]
+    }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_instance.example",
+          "type": "aws_instance",
+          "values": {
+            "instance_type": "m5.large",
+            "tenancy": "default",
+            "root_block_device": [
+              { "volume_type": "gp2", "volume_size": 100 }
+            ],
+            "ebs_block_device": [
+              { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
+              { "volume_type": "gp2", "volume_size": 200 }
+            ]
+          }
+        },
+        {
+          "address": "aws_ebs_volume.data1",
+          "type": "aws_ebs_volume",
+          "values": { "type": "io1", "size": 200, "iops": 4000 }
+        },
+        {
+          "address": "aws_ebs_snapshot.snap1",
+          "type": "aws_ebs_snapshot",
+          "values": { "volume_id": "aws_ebs_volume.data1" }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.copy1",
+          "type": "aws_ebs_snapshot_copy",
+          "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
+        },
+        {
+          "address": "aws_launch_configuration.lc1",
+          "type": "aws_launch_configuration",
+          "values": {
+            "instance_type": "m5.large",
+            "placement_tenancy": "default",
+            "block_device_mappings": [
+              {
+                "device_name": "/dev/xvdb",
+                "ebs": [
+                  { "volume_type": "io1", "volume_size": 150, "iops": 3000 }
+                ]
+              },
+              {
+                "device_name": "/dev/xvdc",
+                "ebs": [
+                  { "volume_type": "gp2", "volume_size": 500 }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "address": "aws_autoscaling_group.asg1",
+          "type": "aws_autoscaling_group",
+          "values": {
+            "desired_capacity": 3,
+            "launch_configuration": "aws_launch_configuration.lc1"
+          }
+        },
+        {
+          "address": "aws_elb.elb1",
+          "type": "aws_elb",
+          "values": {}
+        },
+        {
+          "address": "aws_lb.alb1",
+          "type": "aws_lb",
+          "values": { "load_balancer_type": "application" }
+        },
+        {
+          "address": "aws_db_instance.db1",
+          "type": "aws_db_instance",
+          "values": {
+            "arn": "arn:aws:rds:us-west-2:123456789012:db:mydb",
+            "engine": "postgres",
+            "instance_class": "db.m5.large",
+            "multi_az": false,
+            "allocated_storage": 200,
+            "storage_type": "io1",
+            "iops": 3000
+          }
+        },
+        {
+          "address": "aws_eip.nat1",
+          "type": "aws_eip",
+          "values": { "vpc": true }
+        },
+        {
+          "address": "aws_nat_gateway.nat",
+          "type": "aws_nat_gateway",
+          "values": {
+            "allocation_id": "aws_eip.nat1",
+            "subnet_id": "subnet-123456"
+          }
+        }
+      ]
     }
   }
-  
+}

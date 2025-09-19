@@ -4,15 +4,22 @@ Typed AWS EC2 Instance + Block Device resources (aws_terraform).
 Update: handle EC2 instances with *no* additional volumes (commit parity).
 - root_block_device may be missing, dict, or list-of-dict
 - ebs_block_device may be missing, None, or list-of-dict
+- Tenancy normalization (Infracost 337a504): "dedicated" -> "Dedicated", else "Shared"
 """
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Dict, Any, List
 
-from plancosts.base.filters import Filter
-from plancosts.base.filters import ValueMapping
+from plancosts.base.filters import Filter, ValueMapping
 from .base import BaseAwsResource, BaseAwsPriceComponent, _to_decimal, DEFAULT_VOLUME_SIZE
+
+
+# ---------- helpers ----------
+
+def _normalize_tenancy(v: Any) -> str:
+    # Infracost 337a504 parity
+    return "Dedicated" if f"{v}" == "dedicated" else "Shared"
 
 
 # ---------- Block device price components ----------
@@ -97,7 +104,8 @@ class Ec2InstanceHours(BaseAwsPriceComponent):
         ]
         self.value_mappings = [
             ValueMapping(from_key="instance_type", to_key="instanceType"),
-            ValueMapping(from_key="tenancy",       to_key="tenancy"),
+            # Normalize tenancy per Infracost 337a504
+            ValueMapping(from_key="tenancy", to_key="tenancy", map_func=_normalize_tenancy),
         ]
 
 

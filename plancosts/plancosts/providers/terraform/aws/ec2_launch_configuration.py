@@ -1,11 +1,15 @@
-# plancosts/providers/terraform/aws/ec2_launch_configuration.py
 from __future__ import annotations
 from typing import Dict, Any, List
 
 from plancosts.base.filters import Filter, ValueMapping
-from plancosts.base.resource import PriceComponent, Resource
+from plancosts.base.resource import Resource
 from plancosts.providers.terraform.aws.base import BaseAwsResource, BaseAwsPriceComponent
 from plancosts.providers.terraform.aws.ec2_instance import Ec2BlockDevice
+
+def _normalize_tenancy(v: Any) -> str:
+    # Infracost 337a504 parity
+    return "Dedicated" if f"{v}" == "dedicated" else "Shared"
+
 
 class Ec2LaunchConfigurationHours(BaseAwsPriceComponent):
     def __init__(self, resource: "Ec2LaunchConfiguration") -> None:
@@ -19,9 +23,11 @@ class Ec2LaunchConfigurationHours(BaseAwsPriceComponent):
             Filter(key="tenancy", value="Shared"),
         ]
         self.value_mappings = [
-            ValueMapping(from_key="instance_type", to_key="instanceType"),
-            ValueMapping(from_key="placement_tenancy", to_key="tenancy"),
+            ValueMapping(from_key="instance_type",     to_key="instanceType"),
+            # Normalize placement_tenancy -> tenancy per Infracost 337a504
+            ValueMapping(from_key="placement_tenancy", to_key="tenancy", map_func=_normalize_tenancy),
         ]
+
 
 class Ec2LaunchConfiguration(BaseAwsResource):
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]) -> None:
@@ -56,4 +62,4 @@ class Ec2LaunchConfiguration(BaseAwsResource):
 
     # Wire into BaseAwsResource expectations
     def price_components(self): return list(self._price_components)
-    def sub_resources(self): return list(self._sub_resources)
+    def sub_resources(self):   return list(self._sub_resources)

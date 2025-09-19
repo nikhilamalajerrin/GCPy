@@ -2,7 +2,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
-import re
+import socket
 
 # -------------------
 # Config via env vars
@@ -126,6 +126,7 @@ def _response_for_filters(attrs: list[dict]) -> list[dict]:
     else:
         return [_product(price)]
 
+
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
         # Optional: simulate server error
@@ -156,9 +157,71 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(out)
 
+
+# -------------------
+# Self-test utilities
+# -------------------
+def _normalize_tenancy(v):
+    # Infracost 337a504: "dedicated" -> "Dedicated", else "Shared"
+    return "Dedicated" if f"{v}" == "dedicated" else "Shared"
+
+def _run_self_tests():
+    """
+    Minimal self-test runner (no pytest).
+    - Validates tenancy normalization via plancosts.base.filters.ValueMapping/map_filters
+    - Validates the fixture test.json has expected tenancy fields
+    - Validates the mock pricing engine returns a product for EC2 instance hours regardless of tenancy
+    """
+    from plancosts.base.filters import ValueMapping, map_filters
+
+    # 1) Tenancy mapping checks
+    vm_inst = ValueMapping(from_key="tenancy", to_key="tenancy", map_func=_normalize_tenancy)
+    vm_lc   = ValueMapping(from_key="placement_tenancy", to_key="tenancy", map_func=_normalize_tenancy)
+
+    filters = map_filters([vm_inst], {"tenancy": "dedicated", "instance_type": "m5.large"})
+    assert any(f.key == "tenancy" and f.value == "Dedicated" for f in filters), "Instance tenancy 'dedicated' → 'Dedicated' failed"
+
+    filters = map_filters([vm_inst], {"tenancy": "default"})
+    assert any(f.key == "tenancy" and f.value == "Shared" for f in filters), "Instance tenancy 'default' → 'Shared' failed"
+
+    filters = map_filters([vm_lc], {"placement_tenancy": "dedicated"})
+    assert any(f.key == "tenancy" and f.value == "Dedicated" for f in filters), "LC placement_tenancy 'dedicated' → 'Dedicated' failed"
+
+    filters = map_filters([vm_lc], {"placement_tenancy": "default"})
+    assert any(f.key == "tenancy" and f.value == "Shared" for f in filters), "LC placement_tenancy 'default' → 'Shared' failed"
+
+    # 2) Fixture smoke check
+    with open("test.json", "r", encoding="utf-8") as f:
+        plan = json.load(f)
+    inst = next(r for r in plan["planned_values"]["root_module"]["resources"] if r["address"] == "aws_instance.example")
+    assert inst["values"]["tenancy"] == "default", "Fixture instance tenancy expected 'default'"
+    lc = next(r for r in plan["planned_values"]["root_module"]["resources"] if r["address"] == "aws_launch_configuration.lc1")
+    assert lc["values"]["placement_tenancy"] == "default", "Fixture LC placement_tenancy expected 'default'"
+
+    # 3) Mock pricing engine smoke check (no network):
+    # Build attributes with both Shared and Dedicated, expect a product list
+    attrs_shared = [
+        {"key": "servicecode", "value": "AmazonEC2", "operation": "=="},
+        {"key": "productFamily", "value": "Compute Instance", "operation": "=="},
+        {"key": "tenancy", "value": "Shared", "operation": "=="},
+    ]
+    attrs_dedicated = [
+        {"key": "servicecode", "value": "AmazonEC2", "operation": "=="},
+        {"key": "productFamily", "value": "Compute Instance", "operation": "=="},
+        {"key": "tenancy", "value": "Dedicated", "operation": "=="},
+    ]
+    assert len(_response_for_filters(attrs_shared)) >= 1, "Mock should return product for tenancy=Shared"
+    assert len(_response_for_filters(attrs_dedicated)) >= 1, "Mock should return product for tenancy=Dedicated"
+
+    print("SELF TESTS PASSED")
+
+
 if __name__ == "__main__":
-    print("Mock pricing API on http://127.0.0.1:4000/  (set PLANCOSTS_API_URL=http://127.0.0.1:4000)")
-    print(f"MODE={MODE}  DEFAULT_PRICE={DEFAULT_PRICE}")
-    for k, v in OVERRIDE.items():
-        print(f"  {k}={v}")
-    HTTPServer(("127.0.0.1", 4000), H).serve_forever()
+    if os.getenv("SELF_TEST", "0") == "1":
+        _run_self_tests()
+    else:
+        print("Mock pricing API on http://127.0.0.1:4000/  (set PLANCOSTS_API_URL=http://127.0.0.1:4000)")
+        print(f"MODE={MODE}  DEFAULT_PRICE={DEFAULT_PRICE}")
+        for k, v in OVERRIDE.items():
+            print(f"  {k}={v}")
+        HTTPServer(("127.0.0.1", 4000), H).serve_forever()
