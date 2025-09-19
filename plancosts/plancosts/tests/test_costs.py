@@ -3,7 +3,6 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Dict
 
-
 from plancosts.base import costs as costs_mod
 from plancosts.tests.mocks import PriceComponentMock as PC
 from plancosts.tests.mocks import ResourceMock as R

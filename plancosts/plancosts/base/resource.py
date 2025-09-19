@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List
 
 # Let mypy see Filter, but avoid runtime import cycles
 if TYPE_CHECKING:
@@ -41,7 +41,6 @@ class Resource(ABC):
     def price_components(self) -> List[PriceComponent]: ...
     @abstractmethod
     def has_cost(self) -> bool: ...
-
 
 
 # Utility (used by snapshots)
