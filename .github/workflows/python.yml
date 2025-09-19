@@ -73,24 +73,24 @@ jobs:
             pytest -q
           fi
 
-      - name: Mock self-tests (regex/tenancy/fixtures)
+      - name: Start mock pricing API (background)
         env:
           SELF_TEST: "1"
         run: |
-          python mock_pricing_api.py
+          # Start the mock server from the package module path
+          python -m plancosts.tests.mock_price &
+          # Give it a moment to bind the port
+          sleep 1
+          # Sanity ping
+          curl -sSf http://127.0.0.1:4000/ || true
 
       - name: CLI smoke with fixtures (table)
         env:
           PLANCOSTS_API_URL: http://127.0.0.1:4000
-        shell: bash
         run: |
-          # Start mock server in background
-          python mock_pricing_api.py &
-          MOCK_PID=$!
-          sleep 1
-          # Run any available fixture smokes
-          [[ -f "test_plan_ern.json" ]] && python main.py --tfjson test_plan_ern.json -o table || true
-          [[ -f "test_plan_rds.json" ]] && python main.py --tfjson test_plan_rds.json -o table || true
-          [[ -f "test_plan.json"     ]] && python main.py --tfjson test_plan.json     -o table || true
-          # Stop mock server
-          kill $MOCK_PID || true
+          # Use the copy under the plancosts/ subfolder
+          if [ -f "plancosts/test_plan_ern.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan_ern.json -o table; fi
+          if [ -f "plancosts/test_plan_rds.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan_rds.json -o table; fi
+          if [ -f "plancosts/test_plan.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan.json -o table; fi
+
+    
