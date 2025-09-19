@@ -38,26 +38,21 @@ jobs:
           if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
           pip install black isort ruff mypy pytest build wheel
           # If you have packaging metadata, install editable; else set PYTHONPATH
-          if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
+          if [[ -f plancosts/pyproject.toml || -f plancosts/setup.py || -f plancosts/setup.cfg ]]; then
             pip install -e ./plancosts
           else
-            # <-- KEY FIX: add the inner package path so `import plancosts` works
             echo "PYTHONPATH=$GITHUB_WORKSPACE/plancosts:$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
           fi
           if grep -qE '^[[:space:]]*deps:' Makefile 2>/dev/null; then make deps || true; fi
 
-
       - name: Static checks (format + lint + typecheck)
         shell: bash
         run: |
-          # Prefer Makefile if present
           if [[ -f Makefile ]]; then
-            # Your Makefile's fmt target *formats* (not --check), so it won't fail CI
             make fmt
             make lint || true
             make typecheck || true
           else
-            # No Makefile: format in-place (avoid failing on --check)
             black .
             isort .
             ruff check . || true
@@ -73,11 +68,12 @@ jobs:
             pytest -q
           fi
 
-        - name: Start mock pricing API (background)
-        # Do NOT set SELF_TEST here; we just want the server.
+      - name: Start mock pricing API (background)
+        shell: bash
         run: |
+          # Run server only (no SELF_TEST), in background
           python -m plancosts.tests.mock_price &
-          # Wait for port 4000 to be ready (max ~15s)
+          # Wait for port 4000 to be ready
           for i in $(seq 1 30); do
             if curl -sSf http://127.0.0.1:4000/ >/dev/null 2>&1; then
               echo "Mock API is up."
@@ -85,20 +81,15 @@ jobs:
             fi
             sleep 0.5
           done
-          # Final sanity ping (let the job fail fast if server didn't come up)
+          # Final sanity ping
           curl -sSf http://127.0.0.1:4000/
 
       - name: CLI smoke with fixtures (table)
         env:
           PLANCOSTS_API_URL: http://127.0.0.1:4000
+        shell: bash
         run: |
-          ls -la
           test -f plancosts/main.py || (echo "plancosts/main.py missing" && exit 1)
-          # run against your test plans
-          if [ -f "plancosts/test_plan_ern.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan_ern.json -o table; fi
-          if [ -f "plancosts/test_plan_rds.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan_rds.json -o table; fi
-          if [ -f "plancosts/test_plan.json" ]; then python plancosts/main.py --tfjson plancosts/test_plan.json -o table; fi
-
-
-
-    
+          if [[ -f "plancosts/test_plan_ern.json" ]]; then python plancosts/main.py --tfjson plancosts/test_plan_ern.json -o table; fi
+          if [[ -f "plancosts/test_plan_rds.json" ]]; then python plancosts/main.py --tfjson plancosts/test_plan_rds.json -o table; fi
+          if [[ -f "plancosts/test_plan.json" ]]; then python plancosts/main.py --tfjson plancosts/test_plan.json -o table; fi
