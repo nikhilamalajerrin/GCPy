@@ -18,8 +18,7 @@ class PriceComponent(ABC):
     def set_price(self, price: Decimal) -> None: ...
     @abstractmethod
     def hourly_cost(self) -> Decimal: ...
-    @abstractmethod
-    def skip_query(self) -> bool: ...
+    
 
 
 class Resource(ABC):

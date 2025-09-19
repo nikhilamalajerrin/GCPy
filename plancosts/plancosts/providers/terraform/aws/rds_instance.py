@@ -13,6 +13,7 @@ _MULTI_AZ = ValueMapping(
     map_func=lambda v: "Multi-AZ" if bool(v) else "Single-AZ",
 )
 
+
 class RdsStorageIOPS(PriceComponent):
     def __init__(self, r: "RdsInstance"):
         self._inner = BaseAwsPriceComponent("IOPS", r, "month")
@@ -32,7 +33,7 @@ class RdsStorageIOPS(PriceComponent):
         base = self._inner.HourlyCost()
         iops = self.resource().raw_values().get("iops") or 0
         return base * Decimal(str(iops))
-    def skip_query(self) -> bool: return self._inner.SkipQuery()
+
 
 class RdsStorageGB(PriceComponent):
     def __init__(self, r: "RdsInstance"):
@@ -45,8 +46,9 @@ class RdsStorageGB(PriceComponent):
         ]
         self._inner.value_mappings = [
             ValueMapping(
-                from_key="storage_type", to_key="volumeType",
-                map_func=lambda v: {"standard": "Magnetic", "io1": "Provisioned IOPS"}.get(str(v), "General Purpose")
+                from_key="storage_type",
+                to_key="volumeType",
+                map_func=lambda v: {"standard": "Magnetic", "io1": "Provisioned IOPS"}.get(str(v), "General Purpose"),
             ),
             _MULTI_AZ,
         ]
@@ -60,7 +62,7 @@ class RdsStorageGB(PriceComponent):
         vals = self.resource().raw_values()
         size = vals.get("max_allocated_storage") or vals.get("allocated_storage") or 0
         return base * Decimal(str(size))
-    def skip_query(self) -> bool: return self._inner.SkipQuery()
+
 
 class RdsInstanceHours(PriceComponent):
     def __init__(self, r: "RdsInstance"):
@@ -100,12 +102,12 @@ class RdsInstanceHours(PriceComponent):
     def filters(self): return self._inner.Filters()
     def set_price(self, p): self._inner.SetPrice(p)
     def hourly_cost(self): return self._inner.HourlyCost()
-    def skip_query(self) -> bool: return self._inner.SkipQuery()
+
 
 class RdsInstance(BaseAwsResource):
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
         super().__init__(address, region, raw_values)
         pcs: List[PriceComponent] = [RdsInstanceHours(self), RdsStorageGB(self)]
-        if (self.raw_values().get("storage_type") == "io1"):
+        if self.raw_values().get("storage_type") == "io1":
             pcs.append(RdsStorageIOPS(self))
         self._set_price_components(pcs)

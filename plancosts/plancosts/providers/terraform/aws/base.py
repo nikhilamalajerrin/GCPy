@@ -80,14 +80,6 @@ def _value_mapped_filters(value_mappings: List[ValueMapping], values: Dict[str, 
 # ----------------------------
 
 class BaseAwsPriceComponent:
-    """
-    Region-aware price component with:
-      - region filters (locationType + location)
-      - default filters
-      - value-mapped filters (from raw resource values)
-      - stored unit price (set via set_price)
-    """
-
     def __init__(self, name: str, resource: "BaseAwsResource", time_unit: str):
         self._name = name
         self._resource = resource
@@ -102,33 +94,28 @@ class BaseAwsPriceComponent:
             Filter(key="location", value=location),
         ]
 
-    # --- Required interface methods (Go parity) ---
-
-    def AwsResource(self) -> "BaseAwsResource":  # for parity with Go naming used in wrappers
+    # --- Go-parity style accessors ---
+    def AwsResource(self) -> "BaseAwsResource":
         return self._resource
 
-    def TimeUnit(self) -> str:  # for parity with Go naming used in wrappers
+    def TimeUnit(self) -> str:
         return self._time_unit
 
     def Name(self) -> str:
         return self._name
 
-        # --- Back-compat for older costing code ---
+    # Back-compat names used by other parts of the codebase
     def get_filters(self):
-        """Old name used by the batching/query code."""
         return self.Filters()
 
     def calculate_hourly_cost(self, price: Decimal) -> Decimal:
-        """Old name used by cost creation; sets price then returns hourly cost."""
         self.SetPrice(price)
         return self.HourlyCost()
 
-    
     def Resource(self) -> "BaseAwsResource":
         return self._resource
 
     def Filters(self) -> List[Filter]:
-        """Filters used by the pricing query."""
         mapped = _value_mapped_filters(self._value_mappings, self._resource.raw_values())
         return merge_filters(self._region_filters, self._default_filters, mapped)
 
@@ -136,7 +123,6 @@ class BaseAwsPriceComponent:
         self._price = price
 
     def HourlyCost(self) -> Decimal:
-        """Convert stored unit price to hourly cost."""
         secs = {"hour": Decimal(3600), "month": Decimal(3600 * 730)}
         denom = secs.get(self._time_unit) or Decimal(3600)
         try:
@@ -144,11 +130,7 @@ class BaseAwsPriceComponent:
         except (InvalidOperation, ZeroDivisionError):
             return self._price
 
-    def SkipQuery(self) -> bool:
-        return False
-
-    # --- Python-friendly aliases/back-compat ---
-
+    # --- Python-friendly aliases/back-compat (no skip_query anymore) ---
     def aws_resource(self) -> "BaseAwsResource":
         return self.AwsResource()
 
@@ -170,11 +152,7 @@ class BaseAwsPriceComponent:
     def hourly_cost(self) -> Decimal:
         return self.HourlyCost()
 
-    def skip_query(self) -> bool:
-        return self.SkipQuery()
-
     # --- Mutables for subclasses ---
-
     @property
     def default_filters(self) -> List[Filter]:
         return self._default_filters
