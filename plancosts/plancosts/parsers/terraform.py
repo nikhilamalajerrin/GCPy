@@ -3,7 +3,7 @@ Terraform plan parser that builds typed AWS Terraform resources.
 
 Adds helpers to load/generate plan JSON like the Go commit:
 - load_plan_json(path)
-- generate_plan_json(tfpath, plan_path)
+- generate_plan_json(tfdir, plan_path)
 - parse_plan_json(plan_json)
 """
 from __future__ import annotations
@@ -28,6 +28,8 @@ from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2Autoscali
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
 from plancosts.providers.terraform.aws.rds_instance import RdsInstance
+
+
 # ---------------- Terraform execution helpers ----------------
 
 def _run_tf(tfdir: str, *args: str) -> bytes:
@@ -51,16 +53,16 @@ def generate_plan_json(tfdir: str | None, plan_path: str | None) -> bytes:
 
     # If no plan_path: init + plan to a temp file
     if not plan_path:
-        _ = _run_tf(tfpath, "init", "-input=false", "-lock=false")
+        _ = _run_tf(tfdir, "init", "-input=false", "-lock=false")  # BUGFIX: tfpath -> tfdir
         with tempfile.NamedTemporaryFile(prefix="tfplan-", delete=False) as tmp:
             tmp_plan = tmp.name
         try:
             _ = _run_tf(
-                tfpath, "plan",
+                tfdir, "plan",
                 "-input=false", "-lock=false",
                 f"-out={tmp_plan}"
             )
-            out = _run_tf(tfpath, "show", "-json", tmp_plan)
+            out = _run_tf(tfdir, "show", "-json", tmp_plan)
         finally:
             try:
                 os.remove(tmp_plan)
@@ -69,15 +71,65 @@ def generate_plan_json(tfdir: str | None, plan_path: str | None) -> bytes:
         return out
 
     # If a binary plan is provided, just show -json it
-    return _run_tf(tfpath, "show", "-json", plan_path)
+    return _run_tf(tfdir, "show", "-json", plan_path)
+
+
+# ---------------- Region resolution ----------------
+
+def _aws_region_from_provider(plan_obj: Dict[str, Any]) -> str:
+    """
+    Reads provider aws.expressions.region.constant_value if present.
+    """
+    if not isinstance(plan_obj, dict):
+        return ""
+    return (
+        plan_obj.get("configuration", {})
+        .get("provider_config", {})
+        .get("aws", {})
+        .get("expressions", {})
+        .get("region", {})
+        .get("constant_value", "")
+    )
+
+
+def _region_from_arn(arn: str) -> str:
+    """
+    ARN format: arn:partition:service:region:account-id:resource
+    Return the region token (index 3) when present.
+    """
+    try:
+        parts = arn.split(":")
+        if len(parts) > 3 and parts[3]:
+            return parts[3]
+    except Exception:
+        pass
+    return ""
+
+
+def _select_region(provider_region: str, raw_values: Dict[str, Any]) -> str:
+    """
+    Implements Infracost commit 7a1dfe3 logic:
+    - Default/fallback to us-east-1
+    - Use provider config region if set
+    - Override with region parsed from values.arn when present
+    """
+    region = provider_region or "us-east-1"
+    arn = raw_values.get("arn")
+    if isinstance(arn, str) and arn:
+        arn_region = _region_from_arn(arn)
+        if arn_region:
+            region = arn_region
+    return region
 
 
 # ---------------- JSON parsing into Resources ----------------
 
-
 def _create_resource(
-    rtype: str, address: str, raw_values: Dict[str, Any], aws_region: str
+    rtype: str, address: str, raw_values: Dict[str, Any], provider_region: str
 ) -> Optional[Resource]:
+    # Region per-resource: provider fallback → override from arn if present
+    aws_region = _select_region(provider_region, raw_values)
+
     if rtype == "aws_instance":
         return Ec2Instance(address, aws_region, raw_values)
     if rtype == "aws_ebs_volume":
@@ -102,18 +154,6 @@ def _create_resource(
         return RdsInstance(address, aws_region, raw_values)
     return None
 
-
-def _aws_region(plan_obj: Dict[str, Any]) -> str:
-    if not isinstance(plan_obj, dict):
-        return ""
-    return (
-        plan_obj.get("configuration", {})
-        .get("provider_config", {})
-        .get("aws", {})
-        .get("expressions", {})
-        .get("region", {})
-        .get("constant_value", "")
-    )
 
 def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
     """
@@ -142,7 +182,7 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
         # Very explicit guard for the "'function' object has no attribute 'get'" case
         raise TypeError("parse_plan_json received a function instead of JSON data")
 
-    aws_region = _aws_region(plan_obj)
+    provider_region = _aws_region_from_provider(plan_obj)
 
     # 1) Build resources map from planned_values
     resource_map: Dict[str, Resource] = {}
@@ -156,7 +196,7 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
         address = tr.get("address", "")
         rtype = tr.get("type", "")
         raw_values = tr.get("values") or {}
-        res = _create_resource(rtype, address, raw_values, aws_region)
+        res = _create_resource(rtype, address, raw_values, provider_region)
         if res is not None:
             resource_map[address] = res
 
@@ -171,7 +211,6 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
         _add_references(resource, cfg_index.get(address) or {}, resource_map)
 
     return [resource_map[k] for k in sorted(resource_map.keys())]
-
 
 
 def parse_plan_file(file_path: str) -> List[Resource]:
