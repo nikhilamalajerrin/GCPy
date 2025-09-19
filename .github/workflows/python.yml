@@ -36,16 +36,16 @@ jobs:
         run: |
           python -m pip install -U pip
           if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
-          # Dev tools used by Makefile targets
           pip install black isort ruff mypy pytest build wheel
-          # If you have packaging metadata, install editable; else just add repo to PYTHONPATH
+          # If you have packaging metadata, install editable; else set PYTHONPATH
           if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
             pip install -e .
           else
-            echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+            # <-- KEY FIX: add the inner package path so `import plancosts` works
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/plancosts:$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
           fi
-          # If Makefile defines deps, run it (non-fatal)
           if grep -qE '^[[:space:]]*deps:' Makefile 2>/dev/null; then make deps || true; fi
+
 
       - name: Static checks (format + lint + typecheck)
         shell: bash
