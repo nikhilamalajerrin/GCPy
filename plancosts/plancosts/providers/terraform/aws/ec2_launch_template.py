@@ -4,14 +4,14 @@ Typed AWS EC2 Launch Template (aws_terraform).
   - "Instance hours" price component (for wrapping by ASG)
   - block_device_mappings as typed Ec2BlockDevice subresources
 """
+
 from __future__ import annotations
 
-from typing import Dict, Any, List
-from decimal import Decimal
+from typing import Any, Dict, List
 
-from plancosts.base.filters import Filter
-from plancosts.base.filters import ValueMapping
-from .base import BaseAwsResource, BaseAwsPriceComponent
+from plancosts.base.filters import Filter, ValueMapping
+
+from .base import BaseAwsPriceComponent, BaseAwsResource
 from .ec2_instance import Ec2BlockDevice
 
 

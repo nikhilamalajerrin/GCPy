@@ -10,16 +10,19 @@ Behavior:
 
 This mirrors the Go commit’s WrappedPriceComponent/AutoscaledResource pattern.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from .base import BaseAwsResource, BaseAwsPriceComponent
-from plancosts.base.filters import Filter  # only for type hints; not strictly needed
+from plancosts.base.filters import \
+    Filter  # only for type hints; not strictly needed
 
+from .base import BaseAwsPriceComponent, BaseAwsResource
 
 # ---------- Wrapped price component (multiplies by ASG count) ----------
+
 
 class WrappedPriceComponent(BaseAwsPriceComponent):
     """
@@ -27,9 +30,15 @@ class WrappedPriceComponent(BaseAwsPriceComponent):
     ASG's instance count (desired_capacity). Filters are delegated to the wrapped PC.
     """
 
-    def __init__(self, scaled_resource: "Ec2AutoscalingGroup", wrapped_pc: BaseAwsPriceComponent):
+    def __init__(
+        self, scaled_resource: "Ec2AutoscalingGroup", wrapped_pc: BaseAwsPriceComponent
+    ):
         # Create a "shadow" component with same name/resource/unit as the wrapped one.
-        super().__init__(name=wrapped_pc.name(), resource=wrapped_pc.resource(), time_unit=wrapped_pc.time_unit)
+        super().__init__(
+            name=wrapped_pc.name(),
+            resource=wrapped_pc.resource(),
+            time_unit=wrapped_pc.time_unit,
+        )
         self._scaled_resource = scaled_resource
         self._wrapped_pc = wrapped_pc
 
@@ -55,14 +64,22 @@ class WrappedPriceComponent(BaseAwsPriceComponent):
 
 # ---------- Wrapper resource that mirrors an LC/LT but scales costs ----------
 
+
 class AutoscaledWrappedResource(BaseAwsResource):
     """
     A resource that mirrors (wraps) another AwsResource but whose price components
     are all WrappedPriceComponent that multiply by the ASG desired count.
     """
 
-    def __init__(self, address: str, scaled_resource: "Ec2AutoscalingGroup", wrapped: BaseAwsResource):
-        super().__init__(address=address, region=wrapped.region(), raw_values=wrapped.raw_values())
+    def __init__(
+        self,
+        address: str,
+        scaled_resource: "Ec2AutoscalingGroup",
+        wrapped: BaseAwsResource,
+    ):
+        super().__init__(
+            address=address, region=wrapped.region(), raw_values=wrapped.raw_values()
+        )
         self._scaled_resource = scaled_resource
         self._wrapped = wrapped
 
@@ -77,11 +94,16 @@ class AutoscaledWrappedResource(BaseAwsResource):
         for sub in wrapped.sub_resources():
             # Keep suffix of original address to append to ASG's address
             suffix = sub.address().replace(wrapped.address(), "", 1)
-            subs.append(AutoscaledWrappedResource(f"{self.address()}{suffix}", scaled_resource, sub))
+            subs.append(
+                AutoscaledWrappedResource(
+                    f"{self.address()}{suffix}", scaled_resource, sub
+                )
+            )
         self._set_sub_resources(subs)
 
 
 # ---------- ASG resource itself ----------
+
 
 class Ec2AutoscalingGroup(BaseAwsResource):
     """

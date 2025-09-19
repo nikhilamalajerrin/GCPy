@@ -14,30 +14,29 @@ Matches the Go CLI UX:
 """
 from __future__ import annotations
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
+
 import click
 
 # Optional: load .env / .env.local
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
+
     load_dotenv(".env.local")
     load_dotenv()
 except Exception:
     pass
 
-from plancosts.parsers.terraform import (
-    load_plan_json,
-    generate_plan_json,
-    parse_plan_json,
-)
 from plancosts.base.costs import get_cost_breakdowns
 from plancosts.base.query import GraphQLQueryRunner
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table
+from plancosts.parsers.terraform import (generate_plan_json, load_plan_json,
+                                         parse_plan_json)
 
 
 def _fail(msg: str, ctx: click.Context | None = None) -> None:
@@ -150,7 +149,9 @@ def main(
             sys.exit(0)
 
         # Build endpoint: --api-url overrides; ensure /graphql suffix
-        endpoint = f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
+        endpoint = (
+            f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
+        )
         runner = GraphQLQueryRunner(endpoint)
 
         # Compute cost breakdowns

@@ -5,16 +5,17 @@ GraphQL query build/run utilities.
 - Batches queries for a resource and its sub-resources.
 - Returns a map keyed by (resource -> price_component -> result).
 """
+
 from __future__ import annotations
 
 import json
-import urllib.request
-import urllib.error
-from typing import Dict, List, Tuple, Any
 import logging
+import urllib.error
+import urllib.request
+from typing import Any, Dict, List, Tuple
 
 from plancosts.base.filters import Filter
-from plancosts.base.resource import Resource, PriceComponent
+from plancosts.base.resource import PriceComponent, Resource
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 
 
@@ -22,9 +23,13 @@ class GraphQLQueryRunner:
     def __init__(self, endpoint: str | None = None) -> None:
         self.endpoint = (endpoint or PRICE_LIST_API_ENDPOINT).rstrip("/")
 
-    def run_queries(self, resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
+    def run_queries(
+        self, resource: Resource
+    ) -> Dict[Resource, Dict[PriceComponent, Any]]:
         keys, queries = self._batch(resource)
-        logging.debug("Getting pricing details from %s for %s", self.endpoint, resource.address())
+        logging.debug(
+            "Getting pricing details from %s for %s", self.endpoint, resource.address()
+        )
         results = self._get_query_results(queries) if queries else []
         return self._unpack(keys, results)
 
@@ -62,7 +67,9 @@ class GraphQLQueryRunner:
         except Exception:
             return []
 
-    def _batch(self, resource: Resource) -> Tuple[List[Tuple[Resource, PriceComponent]], List[Dict[str, Any]]]:
+    def _batch(
+        self, resource: Resource
+    ) -> Tuple[List[Tuple[Resource, PriceComponent]], List[Dict[str, Any]]]:
         keys: List[Tuple[Resource, PriceComponent]] = []
         queries: List[Dict[str, Any]] = []
 
@@ -91,6 +98,8 @@ class GraphQLQueryRunner:
 
 def extract_price_from_result(result: Any) -> str:
     try:
-        return result["data"]["products"][0]["onDemandPricing"][0]["priceDimensions"][0]["pricePerUnit"]["USD"]
+        return result["data"]["products"][0]["onDemandPricing"][0]["priceDimensions"][
+            0
+        ]["pricePerUnit"]["USD"]
     except Exception:
         return "0"

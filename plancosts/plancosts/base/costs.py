@@ -1,16 +1,20 @@
 # plancosts/base/costs.py
 from __future__ import annotations
+
+import logging
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List, Optional
-import logging  
-from plancosts.base.resource import Resource, PriceComponent
-from plancosts.base.query import GraphQLQueryRunner, extract_price_from_result
+
+from plancosts.base.query import GraphQLQueryRunner
+from plancosts.base.resource import PriceComponent, Resource
 
 HOURS_IN_MONTH = Decimal(730)
 
+
 def _round6(d: Decimal) -> Decimal:
     return d.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
 
 @dataclass
 class PriceComponentCost:
@@ -18,11 +22,13 @@ class PriceComponentCost:
     hourly_cost: Decimal
     monthly_cost: Decimal
 
+
 @dataclass
 class ResourceCostBreakdown:
     resource: Resource
     price_component_costs: List[PriceComponentCost]
     sub_resource_costs: List["ResourceCostBreakdown"]
+
 
 def _set_price_from_query(pc, result):
     try:
@@ -48,25 +54,31 @@ def _set_price_from_query(pc, result):
             price = Decimal("0")
         else:
             if len(products) > 1 and res_addr:
-                logging.warning("Multiple prices found for %s, using the first price", res_addr)
+                logging.warning(
+                    "Multiple prices found for %s, using the first price", res_addr
+                )
             p0 = products[0]
             price_str = (
                 p0.get("onDemandPricing", [{}])[0]
-                  .get("priceDimensions", [{}])[0]
-                  .get("pricePerUnit", {})
-                  .get("USD", "0")
+                .get("priceDimensions", [{}])[0]
+                .get("pricePerUnit", {})
+                .get("USD", "0")
             )
             price = Decimal(str(price_str))
     except Exception:
         price = Decimal("0")
     pc.set_price(price)
 
+
 def _pc_cost(pc: PriceComponent) -> PriceComponentCost:
     hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(pc, hourly, monthly)
 
-def _breakdown_for(resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
+
+def _breakdown_for(
+    resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]
+) -> ResourceCostBreakdown:
     # sort price components by name for stable diffs
     pcs: List[PriceComponentCost] = []
     for pc in sorted(resource.price_components(), key=lambda p: p.name()):
@@ -83,13 +95,16 @@ def _breakdown_for(resource: Resource, results_map: Dict[Resource, Dict[PriceCom
 
     return ResourceCostBreakdown(resource, pcs, subs)
 
+
 # ---- Compatibility shim expected by tests -------------------------------------
 # Tests monkeypatch costs_mod.run_queries, so keep this symbol at module scope.
 def run_queries(resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
     """Default runner-based implementation; test can monkeypatch this."""
     return GraphQLQueryRunner().run_queries(resource)
 
+
 # ---- Flexible API: supports both (resources) and (runner, resources) ----------
+
 
 def generate_cost_breakdowns(
     runner_or_resources,  # GraphQLQueryRunner | List[Resource]
@@ -130,6 +145,7 @@ def generate_cost_breakdowns(
             continue
         out.append(_breakdown_for(r, all_results))
     return out
+
 
 # Backward-compatible alias used by main.py
 def get_cost_breakdowns(

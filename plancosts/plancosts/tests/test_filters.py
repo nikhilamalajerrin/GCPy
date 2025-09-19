@@ -1,15 +1,18 @@
 # tests/test_filters.py
-import pytest
-from plancosts.base.filters import Filter, ValueMapping, merge_filters, map_filters
+
+from plancosts.base.filters import (Filter, ValueMapping, map_filters,
+                                    merge_filters)
+
 
 def test_mapped_value_passthrough():
     vm = ValueMapping(from_key="from", to_key="to")
     assert vm.mapped_value("val") == "val"
 
+
 def test_mapped_value_with_func():
-    vm = ValueMapping(from_key="from", to_key="to",
-                      map_func=lambda v: f"{v}.mapped")
+    vm = ValueMapping(from_key="from", to_key="to", map_func=lambda v: f"{v}.mapped")
     assert vm.mapped_value("val") == "val.mapped"
+
 
 def test_merge_filters_overrides_by_key():
     a = [Filter(key="key1", value="val1"), Filter(key="key2", value="val2")]
@@ -21,6 +24,7 @@ def test_merge_filters_overrides_by_key():
         Filter(key="key2", value="val2"),
         Filter(key="key3", value="val3"),
     ]
+
 
 def test_map_filters_builds_expected_filters():
     mappings = [

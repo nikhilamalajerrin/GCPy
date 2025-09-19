@@ -1,13 +1,16 @@
 # plancosts/base/filters.py
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
+
 
 @dataclass(frozen=True)
 class Filter:
     key: str
     value: str
     operation: str = "=="
+
 
 @dataclass(frozen=True)
 class ValueMapping:
@@ -22,6 +25,7 @@ class ValueMapping:
     def MappedValue(self, from_val: Any) -> str:  # noqa: N802
         return self.mapped_value(from_val)
 
+
 def merge_filters(*lists: Iterable[Filter]) -> List[Filter]:
     order: List[str] = []
     latest: Dict[str, Filter] = {}
@@ -32,7 +36,10 @@ def merge_filters(*lists: Iterable[Filter]) -> List[Filter]:
             latest[f.key] = f
     return [latest[k] for k in order]
 
-def map_filters(value_mappings: Iterable[ValueMapping], values: Dict[str, Any]) -> List[Filter]:
+
+def map_filters(
+    value_mappings: Iterable[ValueMapping], values: Dict[str, Any]
+) -> List[Filter]:
     out: List[Filter] = []
     for vm in value_mappings:
         if vm.from_key in values:

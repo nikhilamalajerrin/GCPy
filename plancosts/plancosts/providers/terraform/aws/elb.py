@@ -1,9 +1,11 @@
 from __future__ import annotations
-from typing import Dict, Any, List
+
+from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
-from plancosts.base.resource import Resource, PriceComponent
-from plancosts.providers.terraform.aws.base import BaseAwsResource, BaseAwsPriceComponent
+from plancosts.base.resource import PriceComponent, Resource
+from plancosts.providers.terraform.aws.base import (BaseAwsPriceComponent,
+                                                    BaseAwsResource)
 
 
 class ElbHours(BaseAwsPriceComponent):
@@ -13,7 +15,10 @@ class ElbHours(BaseAwsPriceComponent):
         self.default_filters = [
             Filter(key="servicecode", value="AWSELB"),
             # productFamily depends on classic vs ALB/NLB
-            Filter(key="productFamily", value="Load Balancer" if is_classic else "Load Balancer-Application"),
+            Filter(
+                key="productFamily",
+                value="Load Balancer" if is_classic else "Load Balancer-Application",
+            ),
             # Usage type is a regex in the Go code
             Filter(key="usagetype", value="/LoadBalancerUsage/", operation="REGEX"),
         ]
@@ -25,14 +30,18 @@ class ElbHours(BaseAwsPriceComponent):
                     from_key="load_balancer_type",
                     to_key="productFamily",
                     map_func=lambda v: (
-                        "Load Balancer-Network" if f"{v}" == "network" else "Load Balancer-Application"
+                        "Load Balancer-Network"
+                        if f"{v}" == "network"
+                        else "Load Balancer-Application"
                     ),
                 )
             ]
 
 
 class Elb(BaseAwsResource):
-    def __init__(self, address: str, region: str, raw_values: Dict[str, Any], is_classic: bool) -> None:
+    def __init__(
+        self, address: str, region: str, raw_values: Dict[str, Any], is_classic: bool
+    ) -> None:
         super().__init__(address, region, raw_values)
         self._price_components: List[PriceComponent] = [ElbHours(self, is_classic)]
         self._sub_resources: List[Resource] = []

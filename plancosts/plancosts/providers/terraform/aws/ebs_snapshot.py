@@ -1,13 +1,16 @@
 """
 Typed AWS EBS Snapshot resources (aws_terraform).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from plancosts.base.filters import Filter
-from .base import BaseAwsResource, BaseAwsPriceComponent, _to_decimal, DEFAULT_VOLUME_SIZE
+
+from .base import (DEFAULT_VOLUME_SIZE, BaseAwsPriceComponent, BaseAwsResource,
+                   _to_decimal)
 
 
 def _ref(resource: BaseAwsResource, name: str) -> Optional[BaseAwsResource]:
@@ -28,7 +31,10 @@ class EbsSnapshotGB(BaseAwsPriceComponent):
     def hourly_cost(self) -> Decimal:
         base_hourly = super().hourly_cost()
         vol = _ref(self.resource(), "volume_id")
-        size = _to_decimal((vol.raw_values().get("size") if vol else None), Decimal(DEFAULT_VOLUME_SIZE))
+        size = _to_decimal(
+            (vol.raw_values().get("size") if vol else None),
+            Decimal(DEFAULT_VOLUME_SIZE),
+        )
         return base_hourly * size
 
 

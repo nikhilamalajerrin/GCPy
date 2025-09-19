@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="plancosts",
@@ -9,8 +9,8 @@ setup(
         "requests",
     ],
     entry_points={
-        'console_scripts': [
-            'plancosts=main:main',
+        "console_scripts": [
+            "plancosts=main:main",
         ],
     },
 )

@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
 from plancosts.base.resource import PriceComponent, Resource
-from plancosts.providers.terraform.aws.base import BaseAwsResource, BaseAwsPriceComponent
+from plancosts.providers.terraform.aws.base import (BaseAwsPriceComponent,
+                                                    BaseAwsResource)
 
 # Map multi_az -> deploymentOption
 _MULTI_AZ = ValueMapping(
@@ -25,10 +27,18 @@ class RdsStorageIOPS(PriceComponent):
         self._inner.value_mappings = [_MULTI_AZ]
 
     # delegate required API
-    def name(self): return self._inner.Name()
-    def resource(self) -> Resource: return self._inner.Resource()
-    def filters(self): return self._inner.Filters()
-    def set_price(self, p): self._inner.SetPrice(p)
+    def name(self):
+        return self._inner.Name()
+
+    def resource(self) -> Resource:
+        return self._inner.Resource()
+
+    def filters(self):
+        return self._inner.Filters()
+
+    def set_price(self, p):
+        self._inner.SetPrice(p)
+
     def hourly_cost(self):
         base = self._inner.HourlyCost()
         iops = self.resource().raw_values().get("iops") or 0
@@ -48,15 +58,26 @@ class RdsStorageGB(PriceComponent):
             ValueMapping(
                 from_key="storage_type",
                 to_key="volumeType",
-                map_func=lambda v: {"standard": "Magnetic", "io1": "Provisioned IOPS"}.get(str(v), "General Purpose"),
+                map_func=lambda v: {
+                    "standard": "Magnetic",
+                    "io1": "Provisioned IOPS",
+                }.get(str(v), "General Purpose"),
             ),
             _MULTI_AZ,
         ]
 
-    def name(self): return self._inner.Name()
-    def resource(self) -> Resource: return self._inner.Resource()
-    def filters(self): return self._inner.Filters()
-    def set_price(self, p): self._inner.SetPrice(p)
+    def name(self):
+        return self._inner.Name()
+
+    def resource(self) -> Resource:
+        return self._inner.Resource()
+
+    def filters(self):
+        return self._inner.Filters()
+
+    def set_price(self, p):
+        self._inner.SetPrice(p)
+
     def hourly_cost(self):
         base = self._inner.HourlyCost()
         vals = self.resource().raw_values()
@@ -75,33 +96,56 @@ class RdsInstanceHours(PriceComponent):
         self._inner.value_mappings = [
             ValueMapping(from_key="instance_class", to_key="instanceType"),
             ValueMapping(
-                from_key="engine", to_key="databaseEngine",
+                from_key="engine",
+                to_key="databaseEngine",
                 map_func=lambda e: {
-                    "postgresql": "PostgreSQL", "mysql": "MySQL", "mariadb": "MariaDB",
-                    "aurora": "Aurora MySQL", "aurora-mysql": "Aurora MySQL",
+                    "postgresql": "PostgreSQL",
+                    "mysql": "MySQL",
+                    "mariadb": "MariaDB",
+                    "aurora": "Aurora MySQL",
+                    "aurora-mysql": "Aurora MySQL",
                     "aurora-postgresql": "Aurora PostgreSQL",
-                    "oracle-se": "Oracle", "oracle-se1": "Oracle", "oracle-se2": "Oracle", "oracle-ee": "Oracle",
-                    "sqlserver-ex": "SQL Server", "sqlserver-web": "SQL Server",
-                    "sqlserver-se": "SQL Server", "sqlserver-ee": "SQL Server",
-                }.get(str(e).lower(), "")
+                    "oracle-se": "Oracle",
+                    "oracle-se1": "Oracle",
+                    "oracle-se2": "Oracle",
+                    "oracle-ee": "Oracle",
+                    "sqlserver-ex": "SQL Server",
+                    "sqlserver-web": "SQL Server",
+                    "sqlserver-se": "SQL Server",
+                    "sqlserver-ee": "SQL Server",
+                }.get(str(e).lower(), ""),
             ),
             ValueMapping(
-                from_key="engine", to_key="databaseEdition",
+                from_key="engine",
+                to_key="databaseEdition",
                 map_func=lambda e: {
-                    "oracle-se": "Standard", "sqlserver-se": "Standard",
-                    "oracle-se1": "Standard One", "oracle-se2": "Standard 2",
-                    "oracle-ee": "Enterprise", "sqlserver-ee": "Enterprise",
-                    "sqlserver-ex": "Express", "sqlserver-web": "Web",
-                }.get(str(e).lower(), "")
+                    "oracle-se": "Standard",
+                    "sqlserver-se": "Standard",
+                    "oracle-se1": "Standard One",
+                    "oracle-se2": "Standard 2",
+                    "oracle-ee": "Enterprise",
+                    "sqlserver-ee": "Enterprise",
+                    "sqlserver-ex": "Express",
+                    "sqlserver-web": "Web",
+                }.get(str(e).lower(), ""),
             ),
             _MULTI_AZ,
         ]
 
-    def name(self): return self._inner.Name()
-    def resource(self) -> Resource: return self._inner.Resource()
-    def filters(self): return self._inner.Filters()
-    def set_price(self, p): self._inner.SetPrice(p)
-    def hourly_cost(self): return self._inner.HourlyCost()
+    def name(self):
+        return self._inner.Name()
+
+    def resource(self) -> Resource:
+        return self._inner.Resource()
+
+    def filters(self):
+        return self._inner.Filters()
+
+    def set_price(self, p):
+        self._inner.SetPrice(p)
+
+    def hourly_cost(self):
+        return self._inner.HourlyCost()
 
 
 class RdsInstance(BaseAwsResource):
