@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # <<< EDIT THIS >>> the path to your Terraform directory in the repo
-      TERRAFORM_DIR: examples/terraform_0_13
+      TERRAFORM_DIR: examples/terraform_0.13
       # Optional: your pricing API
       PLANCOSTS_API_URL: http://127.0.0.1:4000/
 
