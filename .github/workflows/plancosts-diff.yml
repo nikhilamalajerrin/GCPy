@@ -5,32 +5,28 @@ on:
     paths:
       - '**/*.tf'
       - '**/*.tfvars'
-      - '.github/workflows/plancosts-diff.yml'
       - 'plancosts/**'
-      - 'plancosts/main.py'
+      - 'main.py'
+      - '.github/workflows/plancosts-diff.yml'
 
 permissions:
   contents: read
   pull-requests: write
 
 env:
-  # path inside the repo
-  TERRAFORM_DIR: plancosts/examples/terraform_0_13
+  TERRAFORM_DIR: examples/terraform_0_13
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
-
     steps:
-      # Checkout base branch contents into ./base
-      - name: Checkout base branch
+      - name: Checkout base (merge target)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
 
-      # Checkout PR head into ./pr
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
@@ -42,55 +38,40 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps (use PR requirements if present)
+      - name: Install deps from PR tree
         shell: bash
         run: |
           python -m pip install -U pip
           if [[ -f pr/requirements.txt ]]; then pip install -r pr/requirements.txt; fi
-          pip install black isort ruff mypy pytest build
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
 
-      # Start the mock pricing API from the PR tree
       - name: Start mock pricing API
         shell: bash
-        working-directory: pr
         env:
-          # ensure PR package is importable
-          PYTHONPATH: ${{ github.workspace }}/pr/plancosts:${{ github.workspace }}/pr
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
           python -m plancosts.tests.mock_price &
-          # wait for the server to be ready (port 4000)
-          for i in $(seq 1 30); do
-            if curl -sSf http://127.0.0.1:4000/ >/dev/null 2>&1; then
-              echo "Mock API is up."
-              break
-            fi
+          # TCP readiness probe (mock server 501s on GET /, so just test port)
+          for i in $(seq 1 60); do
+            (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null && echo up && break
             sleep 0.5
           done
-          curl -sSf http://127.0.0.1:4000/ >/dev/null
 
-      # Run BASE CLI (base tree)
       - name: Run plancosts (base)
-        shell: bash
-        working-directory: base
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-          PYTHONPATH: ${{ github.workspace }}/base/plancosts:${{ github.workspace }}/base
         run: |
-          python plancosts/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt
-          tail -n 1 ../base-plancosts.txt | awk '{print $NF}' > ../base-total.txt
+          python pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > base-plancosts.txt
+          awk 'END{print $NF}' base-plancosts.txt > base-total.txt
 
-      # Run PR CLI (pr tree)
       - name: Run plancosts (PR)
-        shell: bash
-        working-directory: pr
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-          PYTHONPATH: ${{ github.workspace }}/pr/plancosts:${{ github.workspace }}/pr
         run: |
-          python plancosts/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt
-          tail -n 1 ../pr-plancosts.txt | awk '{print $NF}' > ../pr-total.txt
+          python pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > pr-plancosts.txt
+          awk 'END{print $NF}' pr-plancosts.txt > pr-total.txt
 
-      - name: Show diff
+      - name: Create diff
         shell: bash
         run: |
           diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
@@ -98,7 +79,7 @@ jobs:
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
-        if: ${{ always() && hashFiles('diff.txt') != '' }}
+        if: hashFiles('diff.txt') != ''
         shell: bash
         run: |
           old=$(cat base-total.txt)
