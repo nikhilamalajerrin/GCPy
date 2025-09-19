@@ -32,6 +32,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
+          # Ensure the checkout succeeds by fetching all history if needed
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,33 +54,54 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
-          python -m plancosts.tests.mock_price &  # Corrected module name
-          # TCP readiness probe
+          echo "Starting mock pricing API..."
+          python -m plancosts.tests.mock_price &  # Confirmed module from directory structure
+          # TCP readiness probe with error handling
           for i in $(seq 1 60); do
             if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
               echo "Mock API is up."
               break
             fi
+            echo "Waiting for mock API (attempt $i/60)..."
             sleep 0.5
           done
+          if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+            echo "Error: Mock API failed to start after 30 seconds."
+            exit 1
+          fi
 
       - name: Run plancosts (base)
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
         run: |
-          python pr/main.py --tfdir pr/${{ env.TERRAFORM_DIR }} -o table > base-plancosts.txt || exit 1
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' base-plancosts.txt > base-total.txt || (echo "0.00" > base-total.txt)
+          echo "Running plancosts on base..."
+          cd base
+          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+            python ../pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { echo "plancosts failed"; exit 1; }
+          else
+            echo "Error: Terraform directory ${{ env.TERRAFORM_DIR }} not found in base."
+            exit 1
+          fi
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || { echo "0.00" > ../base-total.txt; echo "Warning: No OVERALL TOTAL found in base output"; }
 
       - name: Run plancosts (PR)
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
         run: |
-          python pr/main.py --tfdir pr/${{ env.TERRAFORM_DIR }} -o table > pr-plancosts.txt || exit 1
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' pr-plancosts.txt > pr-total.txt || (echo "0.00" > pr-total.txt)
+          echo "Running plancosts on PR..."
+          cd pr
+          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || { echo "plancosts failed"; exit 1; }
+          else
+            echo "Error: Terraform directory ${{ env.TERRAFORM_DIR }} not found in PR."
+            exit 1
+          fi
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || { echo "0.00" > ../pr-total.txt; echo "Warning: No OVERALL TOTAL found in PR output"; }
 
       - name: Create diff
         shell: bash
         run: |
+          echo "Creating diff..."
           diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
@@ -87,8 +110,9 @@ jobs:
         if: always()  # Run even if previous steps fail, for visibility
         shell: bash
         run: |
-          old=$(cat base-total.txt)
-          new=$(cat pr-total.txt)
+          echo "Posting PR comment..."
+          old=$(cat base-total.txt || echo "0.00")
+          new=$(cat pr-total.txt || echo "0.00")
           diff_content=$(cat diff.txt || echo "No differences detected")
           body=$(jq -Mnc \
             --arg old "$old" \
@@ -98,4 +122,4 @@ jobs:
           curl -sL -X POST -d "$body" \
             -H "Content-Type: application/json" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" || echo "Failed to post comment: $?"
