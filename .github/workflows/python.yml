@@ -68,21 +68,24 @@ jobs:
             pytest -q
           fi
 
-      - name: Start mock pricing API (background)
+      - name: Start mock pricing API
         shell: bash
+        working-directory: pr
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts:${{ github.workspace }}/pr
         run: |
-          # Run server only (no SELF_TEST), in background
+          # start server
           python -m plancosts.tests.mock_price &
-          # Wait for port 4000 to be ready
-          for i in $(seq 1 30); do
-            if curl -sSf http://127.0.0.1:4000/ >/dev/null 2>&1; then
+
+          # wait for TCP port to be open (don’t rely on GET /)
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
               echo "Mock API is up."
               break
             fi
             sleep 0.5
           done
-          # Final sanity ping
-          curl -sSf http://127.0.0.1:4000/
+
 
       - name: CLI smoke with fixtures (table)
         env:
