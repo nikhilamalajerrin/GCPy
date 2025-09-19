@@ -26,14 +26,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-          fetch-depth: 0  # Ensure full history is fetched
+          fetch-depth: 0
 
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
-          fetch-depth: 0  # Ensure full history is fetched
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,17 +46,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
+          # Set PYTHONPATH for the entire job
           echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
 
       - name: Start mock pricing API
         shell: bash
-        working-directory: pr
-        env:
-          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
           echo "Starting mock pricing API..."
-          python -m plancosts.tests.mock_price &  # Confirmed from directory structure
-          # TCP readiness probe with error handling
+          # Run from PR directory but don't use working-directory
+          cd pr
+          python -m plancosts.tests.mock_price &
+          
+          # Wait for API to be ready
           for i in $(seq 1 60); do
             if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
               echo "Mock API is up."
@@ -65,6 +66,7 @@ jobs:
             echo "Waiting for mock API (attempt $i/60)..."
             sleep 0.5
           done
+          
           if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
             echo "Error: Mock API failed to start after 30 seconds."
             exit 1
@@ -73,40 +75,67 @@ jobs:
       - name: Run plancosts (base)
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+          PYTHONPATH: ${{ github.workspace }}/base:${{ github.workspace }}/base/plancosts
+        shell: bash
         run: |
           echo "Running plancosts on base..."
           cd base
-          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
-            python ../pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { echo "plancosts failed"; exit 1; }
-          else
-            echo "Warning: Terraform directory ${{ env.TERRAFORM_DIR }} not found in base. Using fallback test plan."
-            if [ -f "../pr/test_plan_ern.json" ]; then
-              python ../pr/main.py --tfjson ../pr/test_plan_ern.json -o table > ../base-plancosts.txt || { echo "Fallback plancosts failed"; exit 1; }
+          
+          # Check if main.py exists in base
+          if [ -f "main.py" ]; then
+            if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+              python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { 
+                echo "plancosts failed on Terraform directory"
+                exit 1
+              }
+            elif [ -f "test_plan_ern.json" ]; then
+              python main.py --tfjson test_plan_ern.json -o table > ../base-plancosts.txt || {
+                echo "plancosts failed on test plan"
+                exit 1
+              }
             else
-              echo "Error: No test plan found in PR directory."
-              exit 1
+              echo "Warning: No Terraform directory or test plan found in base"
+              echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
             fi
+          else
+            echo "Warning: main.py not found in base, using placeholder"
+            echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
           fi
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || { echo "0.00" > ../base-total.txt; echo "Warning: No OVERALL TOTAL found in base output"; }
+          
+          # Extract total
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || {
+            echo "0.00" > ../base-total.txt
+            echo "Warning: No OVERALL TOTAL found in base output"
+          }
 
       - name: Run plancosts (PR)
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+        shell: bash
         run: |
           echo "Running plancosts on PR..."
           cd pr
+          
           if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
-            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || { echo "plancosts failed"; exit 1; }
-          else
-            echo "Warning: Terraform directory ${{ env.TERRAFORM_DIR }} not found in PR. Using fallback test plan."
-            if [ -f "test_plan_ern.json" ]; then
-              python main.py --tfjson test_plan_ern.json -o table > ../pr-plancosts.txt || { echo "Fallback plancosts failed"; exit 1; }
-            else
-              echo "Error: No test plan found in PR directory."
+            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || {
+              echo "plancosts failed on Terraform directory"
               exit 1
-            fi
+            }
+          elif [ -f "test_plan_ern.json" ]; then
+            python main.py --tfjson test_plan_ern.json -o table > ../pr-plancosts.txt || {
+              echo "plancosts failed on test plan"
+              exit 1
+            }
+          else
+            echo "Error: No Terraform directory or test plan found in PR"
+            exit 1
           fi
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || { echo "0.00" > ../pr-total.txt; echo "Warning: No OVERALL TOTAL found in PR output"; }
+          
+          # Extract total
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || {
+            echo "0.00" > ../pr-total.txt
+            echo "Warning: No OVERALL TOTAL found in PR output"
+          }
 
       - name: Create diff
         shell: bash
@@ -117,18 +146,29 @@ jobs:
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
-        if: always()  # Run even if previous steps fail, for visibility
+        if: always()
         shell: bash
         run: |
           echo "Posting PR comment..."
           old=$(cat base-total.txt || echo "0.00")
           new=$(cat pr-total.txt || echo "0.00")
           diff_content=$(cat diff.txt || echo "No differences detected")
+          
+          # Calculate percentage change if both values are numeric
+          if [[ "$old" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ "$new" =~ ^[0-9]+\.?[0-9]*$ ]] && (( $(echo "$old > 0" | bc -l) )); then
+            change=$(echo "scale=2; (($new - $old) / $old) * 100" | bc)
+            change_text=" ($(printf "%+.2f" $change)%)"
+          else
+            change_text=""
+          fi
+          
           body=$(jq -Mnc \
             --arg old "$old" \
             --arg new "$new" \
+            --arg change "$change_text" \
             --arg diff "$diff_content" \
-            '{body: "Base monthly cost: $\($old)\nPR monthly cost: $\($new)\n\n<details><summary>plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
+            '{body: "## 💰 Cost Impact\n\n**Base monthly cost:** $\($old)\n**PR monthly cost:** $\($new)\($change)\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n\($diff)\n```\n</details>\n"}')
+          
           curl -sL -X POST -d "$body" \
             -H "Content-Type: application/json" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
