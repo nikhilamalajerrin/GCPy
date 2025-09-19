@@ -6,29 +6,31 @@ on:
       - '**/*.tf'
       - '**/*.tfvars'
       - '.github/workflows/plancosts-diff.yml'
-      - 'main.py'
       - 'plancosts/**'
+      - 'plancosts/main.py'
 
 permissions:
   contents: read
   pull-requests: write
 
 env:
-  TERRAFORM_DIR: examples/terraform_0_13
+  # path inside the repo
+  TERRAFORM_DIR: plancosts/examples/terraform_0_13
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
+
     steps:
-      # Base branch (e.g., main)
+      # Checkout base branch contents into ./base
       - name: Checkout base branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
 
-      # PR head
+      # Checkout PR head into ./pr
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
@@ -40,46 +42,64 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install deps (use PR requirements if present)
         shell: bash
         run: |
           python -m pip install -U pip
           if [[ -f pr/requirements.txt ]]; then pip install -r pr/requirements.txt; fi
           pip install black isort ruff mypy pytest build
-          # Ensure imports like `plancosts.*` work with your nested layout
-          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr/plancosts:$GITHUB_WORKSPACE/pr:$PYTHONPATH" >> $GITHUB_ENV
 
+      # Start the mock pricing API from the PR tree
       - name: Start mock pricing API
+        shell: bash
         working-directory: pr
+        env:
+          # ensure PR package is importable
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts:${{ github.workspace }}/pr
         run: |
-          nohup python mock_pricing_api.py > /tmp/mock.log 2>&1 &
-          sleep 2
+          python -m plancosts.tests.mock_price &
+          # wait for the server to be ready (port 4000)
+          for i in $(seq 1 30); do
+            if curl -sSf http://127.0.0.1:4000/ >/dev/null 2>&1; then
+              echo "Mock API is up."
+              break
+            fi
+            sleep 0.5
+          done
+          curl -sSf http://127.0.0.1:4000/ >/dev/null
 
+      # Run BASE CLI (base tree)
       - name: Run plancosts (base)
+        shell: bash
+        working-directory: base
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+          PYTHONPATH: ${{ github.workspace }}/base/plancosts:${{ github.workspace }}/base
         run: |
-          cd base
-          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr/plancosts:$GITHUB_WORKSPACE/pr:$PYTHONPATH" >> $GITHUB_ENV
-          python ../pr/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt
+          python plancosts/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt
           tail -n 1 ../base-plancosts.txt | awk '{print $NF}' > ../base-total.txt
 
+      # Run PR CLI (pr tree)
       - name: Run plancosts (PR)
+        shell: bash
+        working-directory: pr
         env:
           PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts:${{ github.workspace }}/pr
         run: |
-          cd pr
-          python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt
+          python plancosts/main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt
           tail -n 1 ../pr-plancosts.txt | awk '{print $NF}' > ../pr-total.txt
 
       - name: Show diff
+        shell: bash
         run: |
           diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
-        if: ${{ always() && hashFiles('diff.txt') != '' && (steps.null.outputs.skip != 'true') }}
+        if: ${{ always() && hashFiles('diff.txt') != '' }}
+        shell: bash
         run: |
           old=$(cat base-total.txt)
           new=$(cat pr-total.txt)
