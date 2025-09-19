@@ -4,7 +4,7 @@ variable "availability_zone" {
 
 resource "aws_ebs_volume" "standard" {
   availability_zone = var.availability_zone
-  size              = 30
+  size              = 300
   type              = "standard"
 }
 
