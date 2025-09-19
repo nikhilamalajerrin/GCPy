@@ -1,4 +1,4 @@
-name: plancosts-diff-simple
+name: plancosts-diff
 
 on:
   pull_request:
@@ -14,122 +14,206 @@ permissions:
   pull-requests: write
 
 env:
+  TERRAFORM_DIR: examples/terraform_0_13
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout base (merge target)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          fetch-depth: 0
+
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Get full history to access both branches
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install dependencies from PR tree
+        shell: bash
+        working-directory: pr
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          echo "PYTHONPATH=$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/plancosts" >> $GITHUB_ENV
+          
+          # Install the package with its dependencies using pyproject.toml
+          if [[ -f pyproject.toml ]]; then
+            echo "Installing from pyproject.toml"
+            pip install -e .
+          elif [[ -f requirements.txt ]]; then
+            echo "Installing from requirements.txt"
+            pip install -r requirements.txt
+          else
+            echo "Installing basic dependencies"
+            pip install requests boto3 pytest
+          fi
+          
+          # Set PYTHONPATH for the entire job
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
+      
+      - name: Install dependencies in base tree
+        shell: bash
+        working-directory: base
+        run: |
+          # Also install deps in base to ensure it can run independently
+          if [[ -f pyproject.toml ]]; then
+            echo "Installing from pyproject.toml"
+            pip install -e .
+          elif [[ -f requirements.txt ]]; then
+            echo "Installing from requirements.txt"
+            pip install -r requirements.txt
+          else
+            echo "No dependency file in base, using minimal deps"
+            pip install requests boto3
+          fi
 
       - name: Start mock pricing API
+        shell: bash
         run: |
           echo "Starting mock pricing API..."
+          # Run from PR directory but don't use working-directory
+          cd pr
           python -m plancosts.tests.mock_price &
-          sleep 2  # Simple wait for API startup
+          
+          # Wait for API to be ready
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+              echo "Mock API is up."
+              break
+            fi
+            echo "Waiting for mock API (attempt $i/60)..."
+            sleep 0.5
+          done
+          
+          if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
+            echo "Error: Mock API failed to start after 30 seconds."
+            exit 1
+          fi
 
-      - name: Run plancosts on base branch
+      - name: Run plancosts (base)
+        env:
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+          PYTHONPATH: ${{ github.workspace }}/base:${{ github.workspace }}/base/plancosts
+        shell: bash
         run: |
-          # Save current changes
-          git stash --include-untracked || true
+          echo "Running plancosts on base..."
+          cd base
           
-          # Switch to base branch
-          git checkout ${{ github.event.pull_request.base.sha }}
-          
-          # Run plancosts
+          # Check if main.py exists in base
           if [ -f "main.py" ]; then
-            # Try with test file if no terraform dir
-            if [ -f "test_plan_ern.json" ]; then
-              python main.py --tfjson test_plan_ern.json -o table > base-plancosts.txt || echo "Base run failed"
+            if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+              python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { 
+                echo "plancosts failed on Terraform directory"
+                exit 1
+              }
+            elif [ -f "test_plan_ern.json" ]; then
+              python main.py --tfjson test_plan_ern.json -o table > ../base-plancosts.txt || {
+                echo "plancosts failed on test plan"
+                exit 1
+              }
             else
-              echo "No test plan available for base"
-              echo "OVERALL TOTAL: 0.00" > base-plancosts.txt
+              echo "Warning: No Terraform directory or test plan found in base"
+              echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
             fi
           else
-            echo "main.py not found in base"
-            echo "OVERALL TOTAL: 0.00" > base-plancosts.txt
+            echo "Warning: main.py not found in base, using placeholder"
+            echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
           fi
           
           # Extract total
-          grep "OVERALL TOTAL" base-plancosts.txt | awk '{print $NF}' > base-total.txt || echo "0.00" > base-total.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || {
+            echo "0.00" > ../base-total.txt
+            echo "Warning: No OVERALL TOTAL found in base output"
+          }
 
-      - name: Run plancosts on PR branch
+      - name: Run plancosts (PR)
+        env:
+          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
+        shell: bash
         run: |
-          # Switch back to PR branch
-          git checkout ${{ github.event.pull_request.head.sha }}
+          echo "Running plancosts on PR..."
+          cd pr
           
-          # Restore any stashed changes
-          git stash pop || true
-          
-          # Run plancosts
-          if [ -f "test_plan_ern.json" ]; then
-            python main.py --tfjson test_plan_ern.json -o table > pr-plancosts.txt
-          elif [ -f "plancosts/test_plan_ern.json" ]; then
-            python main.py --tfjson plancosts/test_plan_ern.json -o table > pr-plancosts.txt
+          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
+            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || {
+              echo "plancosts failed on Terraform directory"
+              exit 1
+            }
+          elif [ -f "test_plan_ern.json" ]; then
+            python main.py --tfjson test_plan_ern.json -o table > ../pr-plancosts.txt || {
+              echo "plancosts failed on test plan"
+              exit 1
+            }
           else
-            echo "No test plan found"
+            echo "Error: No Terraform directory or test plan found in PR"
             exit 1
           fi
           
           # Extract total
-          grep "OVERALL TOTAL" pr-plancosts.txt | awk '{print $NF}' > pr-total.txt || echo "0.00" > pr-total.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || {
+            echo "0.00" > ../pr-total.txt
+            echo "Warning: No OVERALL TOTAL found in PR output"
+          }
 
-      - name: Generate and post diff comment
+      - name: Create diff
+        shell: bash
+        run: |
+          echo "Creating diff..."
+          diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
+          echo "Base total: $(cat base-total.txt)"
+          echo "PR total:   $(cat pr-total.txt)"
+
+      - name: Comment with cost diff
+        if: always()
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          base_cost=$(cat base-total.txt)
-          pr_cost=$(cat pr-total.txt)
+          echo "Posting PR comment..."
+          old=$(cat base-total.txt || echo "0.00")
+          new=$(cat pr-total.txt || echo "0.00")
+          diff_content=$(cat diff.txt || echo "No differences detected")
           
-          # Create simple diff
-          echo "Cost difference:" > comment.txt
-          echo "Base: \$${base_cost}/month" >> comment.txt
-          echo "PR: \$${pr_cost}/month" >> comment.txt
-          
-          # Simple percentage calculation with awk
-          if [ "$base_cost" != "0.00" ]; then
-            change=$(awk -v b="$base_cost" -v p="$pr_cost" 'BEGIN{printf "%.2f", ((p-b)/b)*100}')
-            echo "Change: ${change}%" >> comment.txt
+          # Calculate percentage change using awk instead of bc
+          change_text=""
+          if [[ "$old" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ "$new" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+            change_text=$(awk -v old="$old" -v new="$new" 'BEGIN {
+              if (old > 0) {
+                pct = ((new - old) / old) * 100;
+                printf " (%+.2f%%)", pct
+              }
+            }')
           fi
           
-          # Add detailed diff if exists
-          if diff -u base-plancosts.txt pr-plancosts.txt > full-diff.txt 2>&1; then
-            echo "No differences in output" >> comment.txt
-          else
-            echo "" >> comment.txt
-            echo "<details><summary>Detailed diff</summary>" >> comment.txt
-            echo "" >> comment.txt
-            echo '```diff' >> comment.txt
-            tail -n +4 full-diff.txt >> comment.txt  # Skip diff header
-            echo '```' >> comment.txt
-            echo "</details>" >> comment.txt
-          fi
+          # Create comment body - escape special characters properly
+          diff_escaped=$(echo "$diff_content" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
           
-          # Post comment using GitHub CLI (if available) or curl
-          if command -v gh &> /dev/null; then
-            gh pr comment ${{ github.event.pull_request.number }} --body-file comment.txt
-          else
-            # Use curl as fallback
-            jq -Rs '{"body": .}' comment.txt > body.json
-            curl -L \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-              -d @body.json
-          fi
+          body=$(cat <<EOF
+{
+  "body": "## 💰 Cost Impact\n\n**Base monthly cost:** \${old}\n**PR monthly cost:** \${new}${change_text}\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n\`\`\`diff\n${diff_escaped}\n\`\`\`\n</details>"
+}
+EOF
+          )
+          
+          # Debug: Show what we're sending
+          echo "Sending comment body:"
+          echo "$body" | jq .
+          
+          # Post the comment
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d "$body"
