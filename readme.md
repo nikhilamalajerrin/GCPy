@@ -1,6 +1,6 @@
-# plancosts – Terraform Plan Cost Reporter
+# GCPy – Terraform Plan Cost Reporter
 
-Generate hourly and monthly cost breakdowns from a Terraform plan. Supports output as a table (default) or JSON.
+Generate hourly and monthly cost breakdowns from a Terraform plan. Supports output as a table (default) or JSON. Aimed mainly for GCPy and Terragrunt but will be rolled out for AWS in v1.
 
 ## Requirements
 
@@ -116,6 +116,12 @@ A minimal `test_plan.json` is provided to verify the pipeline, including:
 ## Development Notes
 
 - The parser builds typed AWS Terraform resources (e.g., EC2, EBS, Launch Template/Config, ASG).
+- Currently this supports the following AWS resources:
+   * `aws_instance`
+   * `aws_ebs_volume`
+   * `aws_ebs_snapshot`
+   * `aws_ebs_snapshot_copy`
+   * `aws_autoscaling_group`
 - Each resource has price components (e.g., instance hours, GB-month, IOPS-month).
 - Pricing queries are batched and sent once per run.
 - Output is rendered as a pretty table or JSON. The table shows a tree of resources with sub-resources (e.g., block devices).

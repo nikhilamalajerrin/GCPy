@@ -12,29 +12,26 @@ import json
 import urllib.request
 import urllib.error
 from typing import Dict, List, Tuple, Any
-
+import logging
 from plancosts.base.filters import Filter
 from plancosts.base.resource import Resource, PriceComponent
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 
 # ---- Public API -----------------------------------------------------------------
 
-class GraphQLQueryRunner:
-    """Runs pricing queries against a GraphQL endpoint."""
 
+class GraphQLQueryRunner:
     def __init__(self, endpoint: str | None = None) -> None:
-        self.endpoint = endpoint or PRICE_LIST_API_ENDPOINT
+        self.endpoint = (endpoint or PRICE_LIST_API_ENDPOINT).rstrip("/")
 
     def run_queries(self, resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
-        """Batch, POST, and unpack query results for a resource (and its subs)."""
         keys, queries = self._batch(resource)
+        logging.debug("Getting pricing details from %s for %s",
+                      self.endpoint, resource.address())
         results = self._get_query_results(queries) if queries else []
         return self._unpack(keys, results)
 
-# ---- Helpers (private) ----------------------------------------------------------
-
     def _build_query(self, filters: List[Filter]) -> Dict[str, Any]:
-        # Go version sets variables.filter.attributes to the filter list
         return {
             "query": (
                 "query($filter: Filter){ "
@@ -62,11 +59,8 @@ class GraphQLQueryRunner:
         )
         try:
             with urllib.request.urlopen(req) as resp:
-                body = resp.read().decode("utf-8")
-                # Server returns a JSON array of results (one per query)
-                return json.loads(body)
+                return json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, urllib.error.HTTPError):
-            # Keep soft-failing like the Go tests via mocks; real runs can set the endpoint.
             return []
         except Exception:
             return []
@@ -101,13 +95,7 @@ class GraphQLQueryRunner:
             out.setdefault(r, {})[pc] = res
         return out
 
-# ---- Small utility used by costs ------------------------------------------------
-
 def extract_price_from_result(result: Any) -> str:
-    """
-    Pull the USD unit price string from a GraphQL result. Falls back to "0"
-    if the shape is unexpected/missing (e.g., offline tests).
-    """
     try:
         return result["data"]["products"][0]["onDemandPricing"][0]["priceDimensions"][0]["pricePerUnit"]["USD"]
     except Exception:

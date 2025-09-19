@@ -5,48 +5,32 @@
     "provider_config": {
       "aws": {
         "expressions": {
-          "region": {
-            "constant_value": "us-east-1"
-          }
+          "region": { "constant_value": "us-east-1" }
         }
       }
     },
     "root_module": {
       "resources": [
-        {
-          "address": "aws_instance.example",
-          "expressions": {}
-        },
-        {
-          "address": "aws_ebs_volume.data1",
-          "expressions": {}
-        },
+        { "address": "aws_instance.example", "expressions": {} },
+        { "address": "aws_ebs_volume.data1", "expressions": {} },
         {
           "address": "aws_ebs_snapshot.snap1",
-          "expressions": {
-            "volume_id": {
-              "references": ["aws_ebs_volume.data1"]
-            }
-          }
+          "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
         },
         {
           "address": "aws_ebs_snapshot_copy.copy1",
-          "expressions": {
-            "source_snapshot_id": {
-              "references": ["aws_ebs_snapshot.snap1"]
-            }
-          }
+          "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
         },
-        {
-          "address": "aws_launch_configuration.lc1",
-          "expressions": {}
-        },
+        { "address": "aws_launch_configuration.lc1", "expressions": {} },
         {
           "address": "aws_autoscaling_group.asg1",
+          "expressions": { "launch_configuration": { "references": ["aws_launch_configuration.lc1"] } }
+        },
+        { "address": "aws_elb.elb1", "expressions": {} },
+        {
+          "address": "aws_lb.alb1",
           "expressions": {
-            "launch_configuration": {
-              "references": ["aws_launch_configuration.lc1"]
-            }
+            "load_balancer_type": { "constant_value": "application" }
           }
         }
       ]
@@ -62,46 +46,28 @@
             "instance_type": "m5.large",
             "tenancy": "default",
             "root_block_device": [
-              {
-                "volume_type": "gp2",
-                "volume_size": 100
-              }
+              { "volume_type": "gp2", "volume_size": 100 }
             ],
             "ebs_block_device": [
-              {
-                "volume_type": "io1",
-                "volume_size": 50,
-                "iops": 3000
-              },
-              {
-                "volume_type": "gp2",
-                "volume_size": 200
-              }
+              { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
+              { "volume_type": "gp2", "volume_size": 200 }
             ]
           }
         },
         {
           "address": "aws_ebs_volume.data1",
           "type": "aws_ebs_volume",
-          "values": {
-            "type": "io1",
-            "size": 200,
-            "iops": 4000
-          }
+          "values": { "type": "io1", "size": 200, "iops": 4000 }
         },
         {
           "address": "aws_ebs_snapshot.snap1",
           "type": "aws_ebs_snapshot",
-          "values": {
-            "volume_id": "aws_ebs_volume.data1"
-          }
+          "values": { "volume_id": "aws_ebs_volume.data1" }
         },
         {
           "address": "aws_ebs_snapshot_copy.copy1",
           "type": "aws_ebs_snapshot_copy",
-          "values": {
-            "source_snapshot_id": "aws_ebs_snapshot.snap1"
-          }
+          "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
         },
         {
           "address": "aws_launch_configuration.lc1",
@@ -113,20 +79,13 @@
               {
                 "device_name": "/dev/xvdb",
                 "ebs": [
-                  {
-                    "volume_type": "io1",
-                    "volume_size": 150,
-                    "iops": 3000
-                  }
+                  { "volume_type": "io1", "volume_size": 150, "iops": 3000 }
                 ]
               },
               {
                 "device_name": "/dev/xvdc",
                 "ebs": [
-                  {
-                    "volume_type": "gp2",
-                    "volume_size": 500
-                  }
+                  { "volume_type": "gp2", "volume_size": 500 }
                 ]
               }
             ]
@@ -139,6 +98,16 @@
             "desired_capacity": 3,
             "launch_configuration": "aws_launch_configuration.lc1"
           }
+        },
+        {
+          "address": "aws_elb.elb1",
+          "type": "aws_elb",
+          "values": {}
+        },
+        {
+          "address": "aws_lb.alb1",
+          "type": "aws_lb",
+          "values": { "load_balancer_type": "application" }
         }
       ]
     }

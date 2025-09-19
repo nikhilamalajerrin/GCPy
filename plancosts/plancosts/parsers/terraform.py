@@ -25,7 +25,7 @@ from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
 from plancosts.providers.terraform.aws.ec2_launch_configuration import Ec2LaunchConfiguration
 from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
 from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
-
+from plancosts.providers.terraform.aws.elb import Elb
 
 # ---------------- Terraform execution helpers ----------------
 
@@ -44,9 +44,9 @@ def load_plan_json(path: str) -> bytes:
         return f.read()
 
 
-def generate_plan_json(tfpath: str | None, plan_path: str | None) -> bytes:
-    if not tfpath:
-        raise ValueError("--tfpath is required when generating plan JSON")
+def generate_plan_json(tfdir: str | None, plan_path: str | None) -> bytes:
+    if not tfdir:
+        raise ValueError("--tfdir is required when generating plan JSON")
 
     # If no plan_path: init + plan to a temp file
     if not plan_path:
@@ -73,16 +73,6 @@ def generate_plan_json(tfpath: str | None, plan_path: str | None) -> bytes:
 
 # ---------------- JSON parsing into Resources ----------------
 
-def _aws_region(plan_data: Dict[str, Any]) -> str:
-    return (
-        plan_data.get("configuration", {})
-        .get("provider_config", {})
-        .get("aws", {})
-        .get("expressions", {})
-        .get("region", {})
-        .get("constant_value", "")
-    )
-
 
 def _create_resource(
     rtype: str, address: str, raw_values: Dict[str, Any], aws_region: str
@@ -101,17 +91,58 @@ def _create_resource(
         return Ec2LaunchTemplate(address, aws_region, raw_values)
     if rtype == "aws_autoscaling_group":
         return Ec2AutoscalingGroup(address, aws_region, raw_values)
+    if rtype == "aws_elb":
+        return Elb(address, aws_region, raw_values, is_classic=True)
+    if rtype in ("aws_lb", "aws_alb"):  # alb is an alias for lb
+        return Elb(address, aws_region, raw_values, is_classic=False)
     return None
 
 
-def parse_plan_json(plan_json: bytes) -> List[Resource]:
-    plan = json.loads(plan_json.decode("utf-8"))
-    region = _aws_region(plan)
+def _aws_region(plan_obj: Dict[str, Any]) -> str:
+    if not isinstance(plan_obj, dict):
+        return ""
+    return (
+        plan_obj.get("configuration", {})
+        .get("provider_config", {})
+        .get("aws", {})
+        .get("expressions", {})
+        .get("region", {})
+        .get("constant_value", "")
+    )
+
+def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
+    """
+    Accepts bytes (preferred), str (JSON), or a pre-parsed dict.
+    Returns a list of typed Resource objects.
+    """
+    # Normalize to a dict
+    if isinstance(plan_json, (bytes, bytearray)):
+        try:
+            plan_obj = json.loads(plan_json.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Invalid plan JSON bytes: {e}")
+    elif isinstance(plan_json, str):
+        try:
+            plan_obj = json.loads(plan_json)
+        except Exception as e:
+            raise ValueError(f"Invalid plan JSON string: {e}")
+    elif isinstance(plan_json, dict):
+        plan_obj = plan_json
+    else:
+        raise TypeError(
+            f"parse_plan_json expected bytes|str|dict, got {type(plan_json).__name__}"
+        )
+
+    if callable(plan_obj):
+        # Very explicit guard for the "'function' object has no attribute 'get'" case
+        raise TypeError("parse_plan_json received a function instead of JSON data")
+
+    aws_region = _aws_region(plan_obj)
 
     # 1) Build resources map from planned_values
     resource_map: Dict[str, Resource] = {}
     pv_resources = (
-        plan.get("planned_values", {})
+        plan_obj.get("planned_values", {})
         .get("root_module", {})
         .get("resources", [])
     )
@@ -120,23 +151,22 @@ def parse_plan_json(plan_json: bytes) -> List[Resource]:
         address = tr.get("address", "")
         rtype = tr.get("type", "")
         raw_values = tr.get("values") or {}
-        res = _create_resource(rtype, address, raw_values, region)
+        res = _create_resource(rtype, address, raw_values, aws_region)
         if res is not None:
             resource_map[address] = res
 
     # 2) Wire references using configuration.root_module.resources[*].expressions
     cfg_resources = (
-        plan.get("configuration", {})
+        plan_obj.get("configuration", {})
         .get("root_module", {})
         .get("resources", [])
     )
     cfg_index = {r.get("address"): r for r in cfg_resources}
-
     for address, resource in resource_map.items():
-        cfg = cfg_index.get(address) or {}
-        _add_references(resource, cfg, resource_map)
+        _add_references(resource, cfg_index.get(address) or {}, resource_map)
 
     return [resource_map[k] for k in sorted(resource_map.keys())]
+
 
 
 def parse_plan_file(file_path: str) -> List[Resource]:

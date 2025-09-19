@@ -2,13 +2,12 @@
 """
 Main entry point for plancosts - Generate cost reports from Terraform plans.
 
-This mirrors the Go CLI UX from commit 011ec3a:
-- Supports --tfplan-json OR (--tfplan with --tfpath) OR just --tfpath
+Matches the Go CLI UX from commit 36a4950:
+- Supports --tfplan-json OR (--tfplan with --tfdir) OR just --tfdir
 - Prints validation errors in bright red
-- Uses a GraphQL QueryRunner (endpoint from config) to fetch prices
+- Uses a GraphQL QueryRunner, endpoint from --api-url or env (PLANCOSTS_API_URL), falling back to config default
 - Defaults to table output; supports --output json
 """
-
 from __future__ import annotations
 
 import os
@@ -48,22 +47,23 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option(
     "--tfplan-json",
-    # We validate existence ourselves so we can print red errors.
     type=click.Path(exists=False, dir_okay=False, readable=True),
     help="Path to Terraform plan JSON file (from `terraform show -json`).",
 )
 @click.option(
     "--tfplan",
     type=click.Path(exists=False, dir_okay=False, readable=True),
-    help="Path to Terraform binary plan file (requires --tfpath).",
+    help="Path to Terraform Plan file. Requires --tfdir.",
 )
 @click.option(
-    "--tfpath",
+    "--tfdir",
     type=click.Path(exists=False, file_okay=False, readable=True),
-    help=(
-        "Path to the Terraform project directory. "
-        "If provided without --tfplan, runs `terraform init/plan/show -json` to generate the plan JSON."
-    ),
+    help="Path to the Terraform project directory.",
+)
+@click.option(
+    "--api-url",
+    type=str,
+    help="Price List API base URL (e.g., http://localhost:4000). Overrides PLANCOSTS_API_URL.",
 )
 @click.option(
     "--output",
@@ -82,7 +82,8 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 def main(
     tfplan_json: str | None,
     tfplan: str | None,
-    tfpath: str | None,
+    tfdir: str | None,
+    api_url: str | None,
     output: str,
     verbose: bool,
 ) -> None:
@@ -101,15 +102,15 @@ def main(
             ctx,
         )
 
-    if tfplan and not tfpath:
+    if tfplan and not tfdir:
         _fail(
-            "Please provide a path to the Terraform project (--tfpath) if providing a Terraform Plan file (--tfplan).\n",
+            "Please provide a path to the Terrafrom project (--tfdir) if providing a Terraform Plan file (--tfplan)\n",
             ctx,
         )
 
-    if not tfplan_json and not tfpath:
+    if not tfplan_json and not tfdir:
         _fail(
-            "Please provide either the path to the Terraform project (--tfpath) or a Terraform Plan JSON file (--tfplan-json).",
+            "Please provide either the path to the Terrafrom project (--tfdir) or a Terraform Plan JSON file (--tfplan-json).",
             ctx,
         )
 
@@ -120,16 +121,16 @@ def main(
     if tfplan and not os.path.isfile(tfplan):
         _fail(f"File not found: --tfplan '{tfplan}'")
 
-    if tfpath and not os.path.isdir(tfpath):
-        _fail(f"Directory not found: --tfpath '{tfpath}'")
+    if tfdir and not os.path.isdir(tfdir):
+        _fail(f"Directory not found: --tfdir '{tfdir}'")
 
     try:
         # Get plan JSON
         if tfplan_json:
             plan_json = load_plan_json(tfplan_json)
         else:
-            # Either: (tfpath only) OR (tfplan + tfpath)
-            plan_json = generate_plan_json(tfpath, tfplan)
+            # Either: (tfdir only) OR (tfplan + tfdir)
+            plan_json = generate_plan_json(tfdir, tfplan)
 
         # Parse resources
         resources = parse_plan_json(plan_json)
@@ -137,8 +138,9 @@ def main(
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
-        # NEW: use a GraphQLQueryRunner (like Go's NewGraphQLQueryRunner)
-        runner = GraphQLQueryRunner(PRICE_LIST_API_ENDPOINT)
+        # Build endpoint: --api-url overrides env/config; append /graphql like the Go code
+        endpoint = f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
+        runner = GraphQLQueryRunner(endpoint)
 
         # Compute cost breakdowns (runner + resources)
         breakdowns = get_cost_breakdowns(runner, resources)

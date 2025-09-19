@@ -1,30 +1,31 @@
-"""
-Lightweight config loader (dotenv optional).
-
-Mirrors the Go change that made loading .env/.env.local safe if files
-don’t exist. Exposes PRICE_LIST_API_ENDPOINT for the query runner.
-"""
 from __future__ import annotations
-
 import os
-from pathlib import Path
 
-def _safe_load_dotenv(path: str) -> None:
-    try:
-        p = Path(path)
-        if p.exists() and p.is_file():
-            from dotenv import load_dotenv  # optional dependency
-            load_dotenv(p)
-    except Exception:
-        # Don’t crash if dotenv isn’t installed or loading fails.
-        pass
+def _rstrip_slash(url: str) -> str:
+    return (url or "").rstrip("/")
 
-# Load .env.local then .env if present (no errors if missing)
-_safe_load_dotenv(".env.local")
-_safe_load_dotenv(".env")
+def _to_graphql_endpoint(url: str) -> str:
+    url = _rstrip_slash(url)
+    return url if url.endswith("/graphql") else f"{url}/graphql"
 
-# Public config values
-PRICE_LIST_API_ENDPOINT: str = os.getenv(
-    "PLAN_COSTS_PRICE_LIST_API_ENDPOINT",
-    "http://127.0.0.1:4000/graphql",
-)
+# Base URL (may be with or without /graphql)
+API_URL = _rstrip_slash(os.getenv("PLANCOSTS_API_URL", "http://localhost:4000"))
+
+# Old env var (keep supporting it); may be with or without /graphql
+_LEGACY_ENDPOINT = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "").strip()
+
+def resolve_endpoint(override: str | None = None) -> str:
+    """
+    Returns a fully-qualified GraphQL endpoint:
+      - If --api-url/override is provided, normalize that.
+      - Else if legacy env is set, normalize that.
+      - Else normalize API_URL.
+    """
+    if override:
+        return _to_graphql_endpoint(override)
+    if _LEGACY_ENDPOINT:
+        return _to_graphql_endpoint(_LEGACY_ENDPOINT)
+    return _to_graphql_endpoint(API_URL)
+
+# Back-compat constant (used by older imports)
+PRICE_LIST_API_ENDPOINT = resolve_endpoint()
