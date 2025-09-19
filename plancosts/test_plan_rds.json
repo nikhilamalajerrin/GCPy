@@ -1,0 +1,64 @@
+{
+    "format_version": "0.1",
+    "terraform_version": "0.14.0",
+    "configuration": {
+      "provider_config": {
+        "aws": {
+          "expressions": {
+            "region": { "constant_value": "us-east-1" }
+          }
+        }
+      },
+      "root_module": { "resources": [
+        { "address": "aws_db_instance.db_mysql", "expressions": {} },
+        { "address": "aws_db_instance.db_postgresql", "expressions": {} },
+        { "address": "aws_db_instance.db_postgresql_iops", "expressions": {} },
+        { "address": "aws_db_instance.db_sqlserver", "expressions": {} }
+      ]}
+    },
+    "planned_values": {
+      "root_module": { "resources": [
+        {
+          "address": "aws_db_instance.db_mysql",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "storage_type": "standard",
+            "engine": "mysql",
+            "instance_class": "db.t2.micro"
+          }
+        },
+        {
+          "address": "aws_db_instance.db_postgresql",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "engine": "postgresql",
+            "instance_class": "db.t2.small"
+          }
+        },
+        {
+          "address": "aws_db_instance.db_postgresql_iops",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "engine": "postgresql",
+            "instance_class": "db.t2.small",
+            "storage_type": "io1",
+            "iops": 400
+          }
+        },
+        {
+          "address": "aws_db_instance.db_sqlserver",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "engine": "sqlserver-se",
+            "multi_az": true,
+            "instance_class": "db.t3.xlarge"
+          }
+        }
+      ]}
+    }
+  }
+  

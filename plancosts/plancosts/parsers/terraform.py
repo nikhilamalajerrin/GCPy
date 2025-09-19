@@ -27,6 +27,7 @@ from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTempl
 from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
+from plancosts.providers.terraform.aws.rds_instance import RdsInstance
 # ---------------- Terraform execution helpers ----------------
 
 def _run_tf(tfdir: str, *args: str) -> bytes:
@@ -97,6 +98,8 @@ def _create_resource(
         return Elb(address, aws_region, raw_values, is_classic=False)
     if rtype == "aws_nat_gateway":
         return NatGateway(address, aws_region, raw_values)
+    if rtype == "aws_db_instance":
+        return RdsInstance(address, aws_region, raw_values)
     return None
 
 
