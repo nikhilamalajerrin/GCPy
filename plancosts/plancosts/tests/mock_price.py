@@ -26,16 +26,25 @@ OVERRIDE = {
     "SNAPSHOT_GB": float(os.getenv("MOCK_PRICE_SNAPSHOT_GB", "0.05")),
     # ELB classic hours
     "ELB_CLASSIC_HR": float(os.getenv("MOCK_PRICE_ELB_CLASSIC", "0.025")),
-    # ALB hours
+    # ALB/NLB hours
     "ELB_ALB_HR": float(os.getenv("MOCK_PRICE_ELB_ALB", "0.0225")),
-    # NLB hours
     "ELB_NLB_HR": float(os.getenv("MOCK_PRICE_ELB_NLB", "0.0225")),
     # NAT Gateway hours
     "NATGW_HR": float(os.getenv("MOCK_PRICE_NATGW_HR", "0.045")),
+
+    # ---------- NEW: RDS ----------
+    # RDS instance hours
+    "RDS_INSTANCE_HR": float(os.getenv("MOCK_PRICE_RDS_INSTANCE_HR", "0.0416")),
+    # RDS storage GB-month
+    "RDS_STORAGE_GB": float(os.getenv("MOCK_PRICE_RDS_STORAGE_GB", "0.10")),
+    # RDS provisioned IOPS-month
+    "RDS_IOPS": float(os.getenv("MOCK_PRICE_RDS_IOPS", "0.00004")),
 }
 
 def _usd(price: float) -> dict:
-    return {"USD": f"{price:.6f}".rstrip("0").rstrip(".") if "." in f"{price:.6f}" else f"{price:.6f}"}
+    s = f"{price:.6f}"
+    s = s.rstrip("0").rstrip(".") if "." in s else s
+    return {"USD": s}
 
 def _product(price: float) -> dict:
     return {
@@ -60,27 +69,6 @@ def _response_for_filters(attrs: list[dict]) -> list[dict]:
         v = a.get("value", "")
         bykey.setdefault(k, []).append((op, v))
 
-    def has(key: str, needle: str | None = None) -> bool:
-        if key not in bykey:
-            return False
-        if needle is None:
-            return True
-        for op, val in bykey[key]:
-            if op == "REGEX":
-                # treat value "/X.Y/" as a pattern without the slashes
-                pat = val.strip("/")
-                try:
-                    if re.search(pat, needle) or re.search(pat, val):
-                        return True
-                except re.error:
-                    pass
-                # also allow substring fallback
-                if pat in needle or needle in val:
-                    return True
-            if needle == val:
-                return True
-        return False
-
     service = next((v for _, v in bykey.get("servicecode", [])[-1:]), "")
     family  = next((v for _, v in bykey.get("productFamily", [])[-1:]), "")
     usg     = next((v for _, v in bykey.get("usagetype",   [])[-1:]), "")
@@ -100,7 +88,7 @@ def _response_for_filters(attrs: list[dict]) -> list[dict]:
     elif service == "AmazonEC2" and family == "System Operation" and ("EBS:VolumeP-IOPS.piops" in usg or "EBS:VolumeP-IOPS.piops" in str(bykey.get("usagetype", ""))):
         price = OVERRIDE["EBS_IOPS"]
 
-    # EBS Snapshot GB-month (this commit added 'EBS:SnapshotUsage' filter)
+    # EBS Snapshot GB-month (requires EBS:SnapshotUsage)
     elif service == "AmazonEC2" and family == "Storage Snapshot" and ("EBS:SnapshotUsage" in usg or "EBS:SnapshotUsage" in str(bykey.get("usagetype", ""))):
         price = OVERRIDE["SNAPSHOT_GB"]
 
@@ -117,11 +105,23 @@ def _response_for_filters(attrs: list[dict]) -> list[dict]:
     elif service == "AmazonEC2" and family == "NAT Gateway" and ("NatGateway-Hours" in usg or "NatGateway-Hours" in str(bykey.get("usagetype", ""))):
         price = OVERRIDE["NATGW_HR"]
 
+    # ---------- NEW: RDS pricing ----------
+    # RDS instance hours
+    elif service == "AmazonRDS" and family == "Database Instance":
+        price = OVERRIDE["RDS_INSTANCE_HR"]
+
+    # RDS storage GB-month
+    elif service == "AmazonRDS" and family == "Database Storage":
+        price = OVERRIDE["RDS_STORAGE_GB"]
+
+    # RDS provisioned IOPS-month
+    elif service == "AmazonRDS" and family == "Provisioned IOPS":
+        price = OVERRIDE["RDS_IOPS"]
+
     # ------- Compose the products array based on MODE -------
     if MODE == "none":
-        return []  # no products
+        return []
     elif MODE == "multiple":
-        # two products, first is the one your code should use
         return [_product(price), _product(price * 10.0)]
     else:
         return [_product(price)]
@@ -143,7 +143,6 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             queries = []
 
-        # Each query is {"query": "...", "variables": {"filter": {"attributes": [...]}}}
         resp = []
         for q in queries:
             attrs = (((q or {}).get("variables") or {}).get("filter") or {}).get("attributes", [])

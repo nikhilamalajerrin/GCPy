@@ -9,7 +9,7 @@ def _to_graphql_endpoint(url: str) -> str:
     return url if url.endswith("/graphql") else f"{url}/graphql"
 
 # Base URL (may be with or without /graphql)
-API_URL = _rstrip_slash(os.getenv("PLANCOSTS_API_URL", "http://localhost:4000"))
+API_URL = _rstrip_slash(os.getenv("PLANCOSTS_API_URL", "https://aws-prices-graphql.nikhil.james"))
 
 # Old env var (keep supporting it); may be with or without /graphql
 _LEGACY_ENDPOINT = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "").strip()
