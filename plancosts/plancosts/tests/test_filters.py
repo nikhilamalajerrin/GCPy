@@ -1,7 +1,6 @@
 # tests/test_filters.py
 
-from plancosts.base.filters import (Filter, ValueMapping, map_filters,
-                                    merge_filters)
+from plancosts.base.filters import Filter, ValueMapping, map_filters, merge_filters
 
 
 def test_mapped_value_passthrough():

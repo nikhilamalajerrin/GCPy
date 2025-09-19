@@ -9,8 +9,12 @@ from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
 
-from .base import (DEFAULT_VOLUME_SIZE, BaseAwsPriceComponent, BaseAwsResource,
-                   _to_decimal)
+from .base import (
+    DEFAULT_VOLUME_SIZE,
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+    _to_decimal,
+)
 
 # ----------------------------
 # Price components

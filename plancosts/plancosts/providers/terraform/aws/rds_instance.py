@@ -5,8 +5,10 @@ from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
 from plancosts.base.resource import PriceComponent, Resource
-from plancosts.providers.terraform.aws.base import (BaseAwsPriceComponent,
-                                                    BaseAwsResource)
+from plancosts.providers.terraform.aws.base import (
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+)
 
 # Map multi_az -> deploymentOption
 _MULTI_AZ = ValueMapping(

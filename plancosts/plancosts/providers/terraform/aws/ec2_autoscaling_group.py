@@ -16,8 +16,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from plancosts.base.filters import \
-    Filter  # only for type hints; not strictly needed
+from plancosts.base.filters import Filter  # only for type hints; not strictly needed
 
 from .base import BaseAwsPriceComponent, BaseAwsResource
 

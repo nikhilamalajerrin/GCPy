@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from plancosts.base.filters import Filter
-from plancosts.providers.terraform.aws.base import (BaseAwsPriceComponent,
-                                                    BaseAwsResource)
+from plancosts.providers.terraform.aws.base import (
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+)
 
 
 class NatGatewayHours(BaseAwsPriceComponent):

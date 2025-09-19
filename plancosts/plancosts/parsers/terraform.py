@@ -26,15 +26,15 @@ from typing import Any, Dict, List, Optional
 from plancosts.base.resource import Resource  # type: ignore
 from plancosts.providers.terraform.aws.ebs_snapshot import EbsSnapshot
 from plancosts.providers.terraform.aws.ebs_snapshot_copy import EbsSnapshotCopy
+
 # Typed AWS Terraform resources
 from plancosts.providers.terraform.aws.ebs_volume import EbsVolume
-from plancosts.providers.terraform.aws.ec2_autoscaling_group import \
-    Ec2AutoscalingGroup
+from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
 from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
-from plancosts.providers.terraform.aws.ec2_launch_configuration import \
-    Ec2LaunchConfiguration
-from plancosts.providers.terraform.aws.ec2_launch_template import \
-    Ec2LaunchTemplate
+from plancosts.providers.terraform.aws.ec2_launch_configuration import (
+    Ec2LaunchConfiguration,
+)
+from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
 from plancosts.providers.terraform.aws.rds_instance import RdsInstance

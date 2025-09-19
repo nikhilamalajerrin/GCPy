@@ -4,8 +4,10 @@ from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
 from plancosts.base.resource import PriceComponent, Resource
-from plancosts.providers.terraform.aws.base import (BaseAwsPriceComponent,
-                                                    BaseAwsResource)
+from plancosts.providers.terraform.aws.base import (
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+)
 
 
 class ElbHours(BaseAwsPriceComponent):

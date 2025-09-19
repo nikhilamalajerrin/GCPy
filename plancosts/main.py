@@ -35,8 +35,11 @@ from plancosts.base.query import GraphQLQueryRunner
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table
-from plancosts.parsers.terraform import (generate_plan_json, load_plan_json,
-                                         parse_plan_json)
+from plancosts.parsers.terraform import (
+    generate_plan_json,
+    load_plan_json,
+    parse_plan_json,
+)
 
 
 def _fail(msg: str, ctx: click.Context | None = None) -> None:

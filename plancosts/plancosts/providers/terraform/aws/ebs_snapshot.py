@@ -9,8 +9,12 @@ from typing import Any, Dict, Optional
 
 from plancosts.base.filters import Filter
 
-from .base import (DEFAULT_VOLUME_SIZE, BaseAwsPriceComponent, BaseAwsResource,
-                   _to_decimal)
+from .base import (
+    DEFAULT_VOLUME_SIZE,
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+    _to_decimal,
+)
 
 
 def _ref(resource: BaseAwsResource, name: str) -> Optional[BaseAwsResource]:
