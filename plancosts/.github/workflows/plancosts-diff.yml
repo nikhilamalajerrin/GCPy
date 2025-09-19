@@ -9,14 +9,32 @@ on:
       - 'main.py'
       - 'plancosts/**'
 
+env:
+  TERRAFORM_DIR: examples/terraform_0.13
+  PLANCOSTS_API_URL: http://127.0.0.1:4000/
+
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
-    env:
-      # <<< EDIT THIS >>> the path to your Terraform directory in the repo
-      TERRAFORM_DIR: examples/terraform_0.13
-      # Optional: your pricing API
-      PLANCOSTS_API_URL: http://127.0.0.1:4000/
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements.txt
+
+      - name: Start mock pricing API (background)
+        run: |
+          nohup python mock_pricing_api.py > /tmp/mock.log 2>&1 &
+          sleep 2
+          curl -sSf http://127.0.0.1:4000/ || true  # sanity ping
 
     steps:
       # 1) Checkout master into ./master
