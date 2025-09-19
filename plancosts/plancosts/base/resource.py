@@ -1,10 +1,16 @@
 """
 Resource & PriceComponent abstractions (refactored model).
 """
+
 from __future__ import annotations
-from typing import Dict, List, Any
+
 from abc import ABC, abstractmethod
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Dict, List
+
+# Let mypy see Filter, but avoid runtime import cycles
+if TYPE_CHECKING:
+    from plancosts.base.filters import Filter
 
 
 class PriceComponent(ABC):
@@ -18,7 +24,6 @@ class PriceComponent(ABC):
     def set_price(self, price: Decimal) -> None: ...
     @abstractmethod
     def hourly_cost(self) -> Decimal: ...
-    
 
 
 class Resource(ABC):

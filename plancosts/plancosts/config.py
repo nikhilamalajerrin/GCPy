@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 
@@ -11,19 +12,9 @@ def _to_graphql_endpoint(url: str) -> str:
     url = _rstrip_slash(url)
     return url if url.endswith("/graphql") else f"{url}/graphql"
 
-# ---------- Defaults & envs ----------
 
-# Default to local mock so dev works OOTB
-_DEFAULT_API = "http://127.0.0.1:4000"
-
-# Primary env (with or without /graphql)
-_API_ENV = os.getenv("PLANCOSTS_API_URL", _DEFAULT_API)
-
-# Legacy env (still supported)
-_LEGACY_ENDPOINT = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "").strip()
-
-# Optional: path to terraform binary (cc0ec5f parity)
-_TERRAFORM_BINARY = os.getenv("TERRAFORM_BINARY") or "terraform"
+# Default base URL expected by tests
+_DEFAULT_API = "http://localhost:4000"
 
 @dataclass(frozen=True)
 class Config:
@@ -31,25 +22,34 @@ class Config:
     no_color: bool = False
     terraform_binary: str = "terraform"
 
+
 def resolve_endpoint(override: str | None = None) -> str:
     """
-    Returns a fully-qualified GraphQL endpoint:
-      1) CLI override (if provided)
-      2) Legacy env PLAN_COSTS_PRICE_LIST_API_ENDPOINT
-      3) PLANCOSTS_API_URL (or default)
+    Build a fully-qualified GraphQL endpoint each time it's called.
+
+    Precedence:
+      1) explicit override (e.g., --api-url)
+      2) legacy env PLAN_COSTS_PRICE_LIST_API_ENDPOINT
+      3) primary env PLANCOSTS_API_URL
+      4) default http://localhost:4000/
     """
     if override:
-        return _to_graphql_endpoint(override)
-    if _LEGACY_ENDPOINT:
-        return _to_graphql_endpoint(_LEGACY_ENDPOINT)
-    return _to_graphql_endpoint(_API_ENV)
+        base = override
+    else:
+        legacy = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "").strip()
+        if legacy:
+            base = legacy
+        else:
+            base = os.getenv("PLANCOSTS_API_URL", _DEFAULT_API)
+    return _to_graphql_endpoint(base)
+
 
 def load_config(api_url: str | None = None, no_color: bool = False) -> Config:
     return Config(
         price_list_api_endpoint=resolve_endpoint(api_url),
         no_color=no_color,
-        terraform_binary=_TERRAFORM_BINARY,
+        terraform_binary=os.getenv("TERRAFORM_BINARY", "terraform"),
     )
 
-# Back-compat constant for older imports
+# Back-compat constant for older imports; computed from current env at import time.
 PRICE_LIST_API_ENDPOINT = resolve_endpoint()

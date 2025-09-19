@@ -1,5 +1,6 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -16,22 +17,29 @@ class Handler(BaseHTTPRequestHandler):
         # Use a deterministic price so it’s easy to eyeball (e.g. 0.0100, 0.0200, ...).
         results = []
         for i, _ in enumerate(queries, start=1):
-            results.append({
-                "data": {
-                    "products": [{
-                        "onDemandPricing": [{
-                            "priceDimensions": [{
-                                "pricePerUnit": {"USD": f"{i/100:.4f}"}
-                            }]
-                        }]
-                    }]
+            results.append(
+                {
+                    "data": {
+                        "products": [
+                            {
+                                "onDemandPricing": [
+                                    {
+                                        "priceDimensions": [
+                                            {"pricePerUnit": {"USD": f"{i/100:.4f}"}}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
                 }
-            })
+            )
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(results).encode("utf-8"))
+
 
 if __name__ == "__main__":
     print("Mock price API on http://localhost:4000/graphql")

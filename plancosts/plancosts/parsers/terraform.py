@@ -12,38 +12,43 @@ Commit 9c5c9f1 parity:
 - Use a module-qualified address for resources (e.g. "module.web_app[us-east-1a].aws_instance.web")
 - Wire references WITHIN each module using the module-internal addresses found in expressions
 """
+
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-import tempfile
 import subprocess
-import logging
-from typing import Dict, Any, List, Optional, Tuple
+import tempfile
+from typing import Any, Dict, List, Optional
 
 from plancosts.base.resource import Resource  # type: ignore
+from plancosts.providers.terraform.aws.ebs_snapshot import EbsSnapshot
+from plancosts.providers.terraform.aws.ebs_snapshot_copy import EbsSnapshotCopy
 
 # Typed AWS Terraform resources
 from plancosts.providers.terraform.aws.ebs_volume import EbsVolume
-from plancosts.providers.terraform.aws.ebs_snapshot import EbsSnapshot
-from plancosts.providers.terraform.aws.ebs_snapshot_copy import EbsSnapshotCopy
-from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
-from plancosts.providers.terraform.aws.ec2_launch_configuration import Ec2LaunchConfiguration
-from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
 from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
+from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
+from plancosts.providers.terraform.aws.ec2_launch_configuration import (
+    Ec2LaunchConfiguration,
+)
+from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
 from plancosts.providers.terraform.aws.rds_instance import RdsInstance
 
-
 # ---------------- Terraform execution helpers ----------------
+
 
 def _run_tf(tfdir: str, *args: str) -> bytes:
     tf_bin = os.getenv("TERRAFORM_BINARY") or "terraform"
     cmd = [tf_bin, *args]
     logging.info("Running: %s (cwd=%s)", " ".join(cmd), tfdir)
-    proc = subprocess.run(cmd, cwd=tfdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run(
+        cmd, cwd=tfdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="ignore")
         raise RuntimeError(f"Terraform command failed ({' '.join(cmd)}):\n{stderr}")
@@ -66,9 +71,7 @@ def generate_plan_json(tfdir: str | None, plan_path: str | None) -> bytes:
             tmp_plan = tmp.name
         try:
             _ = _run_tf(
-                tfdir, "plan",
-                "-input=false", "-lock=false",
-                f"-out={tmp_plan}"
+                tfdir, "plan", "-input=false", "-lock=false", f"-out={tmp_plan}"
             )
             out = _run_tf(tfdir, "show", "-json", tmp_plan)
         finally:
@@ -83,6 +86,7 @@ def generate_plan_json(tfdir: str | None, plan_path: str | None) -> bytes:
 
 
 # ---------------- Region resolution ----------------
+
 
 def _aws_region_from_provider(plan_obj: Dict[str, Any]) -> str:
     """
@@ -131,6 +135,7 @@ def _select_region(provider_region: str, raw_values: Dict[str, Any]) -> str:
 
 
 # ---------------- JSON parsing into Resources ----------------
+
 
 def _create_resource(
     rtype: str, address: str, raw_values: Dict[str, Any], provider_region: str
@@ -192,17 +197,13 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
 
     provider_region = _aws_region_from_provider(plan_obj)
 
-    root_pv = (
-        plan_obj.get("planned_values", {})
-        .get("root_module", {})
-    )
-    root_cfg = (
-        plan_obj.get("configuration", {})
-        .get("root_module", {})
-    )
+    root_pv = plan_obj.get("planned_values", {}).get("root_module", {})
+    root_cfg = plan_obj.get("configuration", {}).get("root_module", {})
 
     resources: List[Resource] = []
-    _parse_module(plan_obj, provider_region, root_pv, root_cfg, module_addr="", out_list=resources)
+    _parse_module(
+        plan_obj, provider_region, root_pv, root_cfg, module_addr="", out_list=resources
+    )
     # Sort by address for stable output
     return sorted(resources, key=lambda r: r.address())
 
@@ -216,6 +217,7 @@ def parse_plan_file(file_path: str) -> List[Resource]:
 
 _MODULE_RE = re.compile(r"module\.([^[]+)")
 
+
 def _parse_module_name(module_addr: str) -> str:
     """
     Extract module call name from a child module address like:
@@ -226,6 +228,7 @@ def _parse_module_name(module_addr: str) -> str:
         return "root_module"
     m = _MODULE_RE.search(module_addr)
     return m.group(1) if m and m.group(1) else ""
+
 
 def _parse_module(
     plan_obj: Dict[str, Any],
@@ -242,7 +245,7 @@ def _parse_module(
     - Recurse into child_modules
     """
     # 1) Build resources from this module's planned values
-    pv_resources = (planned_values_module.get("resources") or [])
+    pv_resources = planned_values_module.get("resources") or []
     local_map: Dict[str, Resource] = {}  # internal address -> Resource
 
     for tr in pv_resources:
@@ -259,24 +262,30 @@ def _parse_module(
             out_list.append(res)
 
     # 2) Wire references within this module using its config
-    cfg_resources = (config_module.get("resources") or [])
+    cfg_resources = config_module.get("resources") or []
     cfg_index = {r.get("address"): r for r in cfg_resources}
 
     for internal_addr, res in local_map.items():
         _add_references(res, cfg_index.get(internal_addr) or {}, local_map)
 
     # 3) Recurse into child modules (if any)
-    for child in (planned_values_module.get("child_modules") or []):
+    for child in planned_values_module.get("child_modules") or []:
         child_addr = child.get("address", "") or ""
         module_name = _parse_module_name(child_addr)
         # Find the child module's config under module_calls.<name>.module
         child_cfg = {}
         if module_name:
-            child_cfg = ((config_module.get("module_calls") or {}).get(module_name) or {}).get("module") or {}
+            child_cfg = (
+                (config_module.get("module_calls") or {}).get(module_name) or {}
+            ).get("module") or {}
 
         # Recurse: module_addr grows (use the child module address verbatim to match TF output)
-        next_module_addr = child_addr if module_addr == "" else f"{module_addr}.{child_addr}"
-        _parse_module(plan_obj, provider_region, child, child_cfg, next_module_addr, out_list)
+        next_module_addr = (
+            child_addr if module_addr == "" else f"{module_addr}.{child_addr}"
+        )
+        _parse_module(
+            plan_obj, provider_region, child, child_cfg, next_module_addr, out_list
+        )
 
 
 def _add_references(

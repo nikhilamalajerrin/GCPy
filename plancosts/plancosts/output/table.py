@@ -1,13 +1,15 @@
 """
 ASCII table rendering that mirrors the Go output.
 """
+
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any, Dict, List
-import json
 
 from plancosts.output.json import to_json
+
 
 def _fmt(val: Decimal | float | int, pattern: str = "{:.4f}") -> str:
     try:
@@ -15,17 +17,20 @@ def _fmt(val: Decimal | float | int, pattern: str = "{:.4f}") -> str:
     except Exception:
         return str(val)
 
+
 def _branch(i: int, total: int) -> str:
     return "└─" if i == total else "├─"
 
+
 def _render(rows: List[List[str]]) -> str:
-    name_w   = max((len(r[0]) for r in rows), default=4)
+    name_w = max((len(r[0]) for r in rows), default=4)
     hourly_w = max((len(r[1]) for r in rows), default=11)
-    month_w  = max((len(r[2]) for r in rows), default=12)
+    month_w = max((len(r[2]) for r in rows), default=12)
     line = f"{{:<{name_w}}}  {{:>{hourly_w}}}  {{:>{month_w}}}"
     out = [line.format("NAME", "HOURLY COST", "MONTHLY COST")]
     out += [line.format(*r) for r in rows]
     return "\n".join(out)
+
 
 def to_table(breakdowns: Any, no_color: bool = False) -> str:
     data: List[Dict[str, Any]] = json.loads(to_json(breakdowns))
@@ -53,7 +58,13 @@ def to_table(breakdowns: Any, no_color: bool = False) -> str:
             m = Decimal(str(pc.get("monthlyCost", 0)))
             th += h
             tm += m
-            rows.append([f"{_branch(i, total_items)} {pc.get('priceComponent','')}", _fmt(h), _fmt(m)])
+            rows.append(
+                [
+                    f"{_branch(i, total_items)} {pc.get('priceComponent','')}",
+                    _fmt(h),
+                    _fmt(m),
+                ]
+            )
 
         for sub in res.get("subresources", []) or []:
             short = sub.get("resource", "").replace(f"{title}.", "", 1)
@@ -63,7 +74,13 @@ def to_table(breakdowns: Any, no_color: bool = False) -> str:
                 m = Decimal(str(pc.get("monthlyCost", 0)))
                 th += h
                 tm += m
-                rows.append([f"{_branch(i, total_items)} {short} {pc.get('priceComponent','')}", _fmt(h), _fmt(m)])
+                rows.append(
+                    [
+                        f"{_branch(i, total_items)} {short} {pc.get('priceComponent','')}",
+                        _fmt(h),
+                        _fmt(m),
+                    ]
+                )
 
         rows.append(["Total", _fmt(th), _fmt(tm)])
         rows.append(["", "", ""])

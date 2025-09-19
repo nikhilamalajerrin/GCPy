@@ -10,10 +10,9 @@ Mirrors the Go commit that introduced:
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
-from plancosts.base.filters import Filter, merge_filters
-from plancosts.base.filters import ValueMapping
+from plancosts.base.filters import Filter, ValueMapping, merge_filters
 
 # ----------------------------
 # Constants & region mapping
@@ -52,6 +51,7 @@ REGION_MAPPING: Dict[str, str] = {
 # Internal helpers
 # ----------------------------
 
+
 def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
     """Safely coerce any JSON-ish value to Decimal."""
     if isinstance(val, Decimal):
@@ -64,7 +64,9 @@ def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
         return default
 
 
-def _value_mapped_filters(value_mappings: List[ValueMapping], values: Dict[str, Any]) -> List[Filter]:
+def _value_mapped_filters(
+    value_mappings: List[ValueMapping], values: Dict[str, Any]
+) -> List[Filter]:
     """Map raw values to pricing filters using ValueMapping rules."""
     out: List[Filter] = []
     for vm in value_mappings:
@@ -78,6 +80,7 @@ def _value_mapped_filters(value_mappings: List[ValueMapping], values: Dict[str, 
 # ----------------------------
 # Base AWS Price Component
 # ----------------------------
+
 
 class BaseAwsPriceComponent:
     def __init__(self, name: str, resource: "BaseAwsResource", time_unit: str):
@@ -116,7 +119,9 @@ class BaseAwsPriceComponent:
         return self._resource
 
     def Filters(self) -> List[Filter]:
-        mapped = _value_mapped_filters(self._value_mappings, self._resource.raw_values())
+        mapped = _value_mapped_filters(
+            self._value_mappings, self._resource.raw_values()
+        )
         return merge_filters(self._region_filters, self._default_filters, mapped)
 
     def SetPrice(self, price: Decimal) -> None:
@@ -173,6 +178,7 @@ class BaseAwsPriceComponent:
 # ----------------------------
 # Base AWS Resource
 # ----------------------------
+
 
 class BaseAwsResource:
     """

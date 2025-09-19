@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from decimal import Decimal
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 
 class PriceComponentMock:
@@ -10,6 +11,7 @@ class PriceComponentMock:
     - set_price() stores the fetched unit price
     - filters() returns [] unless set
     """
+
     def __init__(self, hourly_cost: Decimal, name: str = ""):
         self._name = name
         self._hourly_cost = Decimal(hourly_cost)

@@ -3,13 +3,20 @@ Typed AWS EBS Snapshot Copy (aws_terraform).
 Cost is based on the *source snapshot's* volume size:
   source_snapshot_id -> (snapshot) -> volume_id -> (volume).size
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from plancosts.base.filters import Filter
-from .base import BaseAwsResource, BaseAwsPriceComponent, _to_decimal, DEFAULT_VOLUME_SIZE
+
+from .base import (
+    DEFAULT_VOLUME_SIZE,
+    BaseAwsPriceComponent,
+    BaseAwsResource,
+    _to_decimal,
+)
 
 
 def _ref(resource: BaseAwsResource, name: str) -> Optional[BaseAwsResource]:
@@ -36,7 +43,9 @@ class EbsSnapshotCopyGB(BaseAwsPriceComponent):
         if src:
             vol = _ref(src, "volume_id")
             if vol:
-                size = _to_decimal(vol.raw_values().get("size"), Decimal(DEFAULT_VOLUME_SIZE))
+                size = _to_decimal(
+                    vol.raw_values().get("size"), Decimal(DEFAULT_VOLUME_SIZE)
+                )
 
         return base_hourly * size
 
