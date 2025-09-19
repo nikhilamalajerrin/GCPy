@@ -32,7 +32,18 @@
           "expressions": {
             "load_balancer_type": { "constant_value": "application" }
           }
+        },
+        {
+          "address": "aws_eip.nat1",
+          "expressions": {}
+        },
+        {
+          "address": "aws_nat_gateway.nat",
+          "expressions": {
+            "allocation_id": { "references": ["aws_eip.nat1"] }
+          }
         }
+        
       ]
     }
   },
@@ -108,7 +119,21 @@
           "address": "aws_lb.alb1",
           "type": "aws_lb",
           "values": { "load_balancer_type": "application" }
+        },
+        {
+          "address": "aws_eip.nat1",
+          "type": "aws_eip",
+          "values": { "vpc": true }
+        },
+        {
+          "address": "aws_nat_gateway.nat",
+          "type": "aws_nat_gateway",
+          "values": {
+            "allocation_id": "aws_eip.nat1",
+            "subnet_id": "subnet-123456"   
+          }
         }
+        
       ]
     }
   }

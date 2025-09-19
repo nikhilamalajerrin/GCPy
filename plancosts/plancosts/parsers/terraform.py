@@ -26,7 +26,7 @@ from plancosts.providers.terraform.aws.ec2_launch_configuration import Ec2Launch
 from plancosts.providers.terraform.aws.ec2_launch_template import Ec2LaunchTemplate
 from plancosts.providers.terraform.aws.ec2_autoscaling_group import Ec2AutoscalingGroup
 from plancosts.providers.terraform.aws.elb import Elb
-
+from plancosts.providers.terraform.aws.nat_gateway import NatGateway
 # ---------------- Terraform execution helpers ----------------
 
 def _run_tf(tfdir: str, *args: str) -> bytes:
@@ -95,6 +95,8 @@ def _create_resource(
         return Elb(address, aws_region, raw_values, is_classic=True)
     if rtype in ("aws_lb", "aws_alb"):  # alb is an alias for lb
         return Elb(address, aws_region, raw_values, is_classic=False)
+    if rtype == "aws_nat_gateway":
+        return NatGateway(address, aws_region, raw_values)
     return None
 
 
