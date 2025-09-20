@@ -15,6 +15,7 @@ permissions:
 
 env:
   TERRAFORM_DIR: examples/terraform_0_13
+  # This is correct for steps running on the host VM:
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
@@ -62,9 +63,14 @@ jobs:
         run: |
           set -euxo pipefail
           cd pr
-          nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+          # Make sure in-repo imports work when running the test server by file path
+          export PYTHONPATH="$PWD:$PWD/plancosts:${PYTHONPATH:-}"
+
+          # Run the server by file path so it works even if plancosts.tests isn't in the wheel
+          nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
+
           if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
             echo "Mock server exited immediately:"
             sed -n '1,200p' ../mock_server.log || true
@@ -75,33 +81,39 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          i=0
-          code="000"
-          until [ $i -ge 60 ]; do
+          for i in {1..60}; do
             code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
-            [ "$code" = "200" ] && echo "Mock API ready" && break
-            i=$((i+1))
+            if [ "$code" = "200" ]; then
+              echo "Mock API ready"
+              exit 0
+            fi
             sleep 0.5
           done
-          if [ "$code" != "200" ]; then
-            echo "==== mock_server.log ===="
-            cat mock_server.log || true
-            exit 1
-          fi
+          echo "==== mock_server.log ===="
+          cat mock_server.log || true
+          exit 1
 
+      # -------------------- RUN EXTERNAL ACTION (BASE) --------------------
       - name: Run plancosts (BASE) via external action
         id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.3
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.4
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
+        env:
+          # Inside the docker *action* container, 127.0.0.1 is the container.
+          # Use host gateway to reach the mock server running on the host VM:
+          PLANCOSTS_API_URL: http://172.17.0.1:4000
 
+      # -------------------- RUN EXTERNAL ACTION (PR) --------------------
       - name: Run plancosts (PR) via external action
         id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.3
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.4
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
+        env:
+          PLANCOSTS_API_URL: http://172.17.0.1:4000
 
       - name: Create diff
         shell: bash
@@ -111,8 +123,10 @@ jobs:
           PR_TXT="pr-plancosts.txt"
           test -f "$BASE_TXT" || (echo "Missing $BASE_TXT" && exit 1)
           test -f "$PR_TXT" || (echo "Missing $PR_TXT" && exit 1)
+
           awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" > base-total.txt || echo "0.00" > base-total.txt
           awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   > pr-total.txt   || echo "0.00" > pr-total.txt
+
           diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
@@ -127,10 +141,12 @@ jobs:
           old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
           new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
           diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
+
           change_text=""
           if echo "$old $new" | grep -Eq '^[0-9]+(\.[0-9]+)? [0-9]+(\.[0-9]+)?$' && [ "$old" != "0" ] && [ "$old" != "0.00" ]; then
             change_text="$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')"
           fi
+
           printf '%s' "$diff_content" > diff_body.txt
           body="$(jq -n \
             --arg old "$old" \
@@ -139,6 +155,7 @@ jobs:
             --rawfile diff diff_body.txt \
             '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
           )"
+
           curl -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -150,8 +167,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ -f mock_pid.txt ]]; then
-            kill "$(cat mock_pid.txt)" || true
+          if [[ -f pr/mock_pid.txt ]]; then
+            kill "$(cat pr/mock_pid.txt)" || true
           fi
           echo "--- mock_server.log (tail) ---"
           tail -n 100 mock_server.log || true
