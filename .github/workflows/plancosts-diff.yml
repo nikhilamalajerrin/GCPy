@@ -152,12 +152,20 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
 
-      - name: Stop mock pricing API
-        if: always()
+      - name: Start mock pricing API (background with logs)
         shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONPATH: ${{ github.workspace }}/pr
         run: |
-          if [ -f mock_pid.txt ]; then
-            kill "$(cat mock_pid.txt)" || true
+          set -euxo pipefail
+          cd pr
+          nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+          echo $! > ../mock_pid.txt
+          sleep 1
+          if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
+            echo "Mock server exited immediately:"
+            sed -n '1,200p' ../mock_server.log || true
+            exit 1
           fi
-          echo "--- mock_server.log (tail) ---"
-          tail -n 200 mock_server.log || true
+
