@@ -156,13 +156,49 @@ jobs:
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
-          PYTHONPATH: ${{ github.workspace }}/pr/plancosts   # safe to keep for intra-package imports
+          # Point directly at the *package parent* (inner plancosts package lives here)
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts
         run: |
           set -euxo pipefail
           cd pr
-          nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
-          echo $! > ../mock_pid.txt
-          sleep 1
-          kill -0 "$(cat ../mock_pid.txt)"
+
+          echo "=== Verify import with PYTHONPATH=${PYTHONPATH} ==="
+          python - <<'PY'
+      import sys, importlib
+      print("sys.path[:3] =", sys.path[:3])
+      m = importlib.import_module("plancosts")
+      print("plancosts __file__:", getattr(m, "__file__", "<none>"))
+        try:
+            t = importlib.import_module("plancosts.tests.mock_price")
+            print("mock_price __file__:", getattr(t, "__file__", "<none>"))
+        except Exception as e:
+            print("IMPORT ERROR plancosts.tests.mock_price:", e)
+        PY
+
+            # Try module form first (fast path)
+            set +e
+            nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+            pid=$!
+            echo $pid > ../mock_pid.txt
+            sleep 1
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "Mock server started (module form) PID=$pid"
+              set -e
+            else
+              echo "Module form failed, trying direct script path..."
+              # Direct file path fallback; keeps PYTHONPATH so absolute imports work
+              nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
+              pid=$!
+              echo $pid > ../mock_pid.txt
+              sleep 1
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "Mock server exited immediately; showing log:"
+                sed -n '1,200p' ../mock_server.log || true
+                exit 1
+              fi
+              set -e
+              echo "Mock server started (file path) PID=$pid"
+            fi
+
 
 
