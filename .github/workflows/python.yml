@@ -4,13 +4,13 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '**/*.py'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-      - 'Makefile'
-      - '.github/workflows/python.yml'
-      - 'test_plan*.json'
-      - 'plancosts/**'
+      - "**/*.py"
+      - "pyproject.toml"
+      - "requirements*.txt"
+      - "Makefile"
+      - ".github/workflows/python.yml"
+      - "test_plan*.json"
+      - "plancosts/**"
   pull_request:
     branches: [ main ]
 
@@ -38,13 +38,10 @@ jobs:
         run: |
           python -m pip install -U pip
           if [[ -f pyproject.toml ]]; then
-            echo "Installing package from pyproject.toml"
             pip install -e ".[dev]" || pip install -e .
           elif [[ -f requirements.txt ]]; then
-            echo "Installing from requirements.txt"
             pip install -r requirements.txt
           else
-            echo "No dependency file found, installing basic dependencies"
             pip install requests boto3
           fi
           pip install black isort ruff mypy pytest build wheel
@@ -79,23 +76,21 @@ jobs:
       - name: Start mock pricing API
         shell: bash
         run: |
-          echo "Starting mock pricing API..."
           python -m plancosts.tests.mock_price &
           echo $! > mock_pid.txt
 
       - name: Wait for mock API readiness (POST /graphql)
         shell: bash
         run: |
-          for i in {1..60}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:4000/graphql")
-            if [[ "$code" == "200" ]]; then
-              echo "Mock API ready"
-              exit 0
-            fi
+          i=0
+          code="000"
+          until [ $i -ge 60 ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:4000/graphql' || true)"
+            [ "$code" = "200" ] && echo "Mock API ready" && break
+            i=$((i+1))
             sleep 0.5
           done
-          echo "Mock API failed readiness" >&2
-          exit 1
+          [ "$code" = "200" ] || { echo "Mock API failed readiness"; exit 1; }
 
       - name: CLI smoke tests with fixtures (table)
         env:
@@ -107,9 +102,9 @@ jobs:
           elif [[ -f "plancosts/main.py" ]]; then
             MAIN_SCRIPT="plancosts/main.py"
           else
-            echo "Warning: main.py not found in expected locations"; exit 0
+            echo "No main.py found; skipping"
+            exit 0
           fi
-          echo "Using main script: $MAIN_SCRIPT"
           ran_any=0
           for test_file in test_plan_ern.json test_plan_rds.json test_plan.json; do
             if [[ -f "$test_file" ]]; then

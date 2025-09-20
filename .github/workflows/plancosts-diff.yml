@@ -36,7 +36,7 @@ jobs:
           path: pr
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Set up Python (for mock server)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -55,13 +55,6 @@ jobs:
             pip install pytest
           fi
 
-      - name: Verify PR install & import path
-        shell: bash
-        working-directory: pr
-        run: |
-          set -euxo pipefail
-          python -c "import importlib; m=importlib.import_module('plancosts'); print('plancosts module path:', m.__file__)"
-
       - name: Start mock pricing API (background with logs)
         shell: bash
         env:
@@ -72,46 +65,41 @@ jobs:
           nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
-          kill -0 "$(cat ../mock_pid.txt)"
+          # If dead, dump logs
+          if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
+            echo "Mock server exited immediately:"
+            sed -n '1,200p' ../mock_server.log || true
+            exit 1
+          fi
 
-      - name: Wait for mock API readiness (POST /graphql) + debug if fails
+      - name: Wait for mock API readiness (POST /graphql)
         shell: bash
         run: |
           set -euxo pipefail
           i=0
+          code="000"
           until [ $i -ge 60 ]; do
-            code="$(curl -s -o /dev/null -w "%{http_code}" -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
-            if [ "$code" = "200" ]; then
-              echo "Mock API ready"
-              break
-            fi
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
+            [ "$code" = "200" ] && echo "Mock API ready" && break
             i=$((i+1))
-            if [ $((i % 10)) -eq 0 ]; then
-              echo "--- mock_server.log (tail) ---"
-              tail -n 50 mock_server.log || true
-              echo "------------------------------"
-            fi
             sleep 0.5
           done
-          if [ $i -ge 60 ]; then
-            echo "==== mock_server.log (full) ===="
+          if [ "$code" != "200" ]; then
+            echo "==== mock_server.log ===="
             cat mock_server.log || true
-            echo "==== listening sockets (hint) ==="
-            command -v ss >/dev/null && ss -ltnp || true
-            echo "Mock API failed readiness" >&2
             exit 1
           fi
 
       - name: Run plancosts (BASE) via external action
         id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.1
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
 
       - name: Run plancosts (PR) via external action
         id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.1
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
@@ -148,7 +136,6 @@ jobs:
             change_text="$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')"
           fi
 
-          # Build JSON safely with jq
           printf '%s' "$diff_content" > diff_body.txt
           body="$(jq -n \
             --arg old "$old" \
@@ -172,5 +159,5 @@ jobs:
           if [ -f mock_pid.txt ]; then
             kill "$(cat mock_pid.txt)" || true
           fi
-          echo "--- mock_server.log (tail on exit) ---"
-          tail -n 100 mock_server.log || true
+          echo "--- mock_server.log (tail) ---"
+          tail -n 200 mock_server.log || true
