@@ -81,7 +81,7 @@ jobs:
       # ---- Run your external action against BASE ----
       - name: Run plancosts (BASE) via external action
         id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.0
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
@@ -89,7 +89,7 @@ jobs:
       # ---- Run your external action against PR ----
       - name: Run plancosts (PR) via external action
         id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.0
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
