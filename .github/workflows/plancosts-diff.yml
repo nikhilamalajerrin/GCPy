@@ -72,7 +72,7 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for mock API readiness (POST /graphql) + debug if fails
+      - name: Wait for mock API readiness (POST /graphql)
         shell: bash
         run: |
           set -euxo pipefail
