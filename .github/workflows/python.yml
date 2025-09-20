@@ -4,11 +4,13 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '**/*.py'
-      - 'requirements*.txt'
-      - 'Makefile'
-      - '.github/workflows/python.yml'
-      - 'test_plan*.json'
+      - "**/*.py"
+      - "pyproject.toml"
+      - "requirements*.txt"
+      - "Makefile"
+      - ".github/workflows/python.yml"
+      - "test_plan*.json"
+      - "plancosts/**"
   pull_request:
     branches: [ main ]
 
@@ -35,27 +37,15 @@ jobs:
         shell: bash
         run: |
           python -m pip install -U pip
-          
-          # Install the package with its dependencies using pyproject.toml
           if [[ -f pyproject.toml ]]; then
-            echo "Installing package from pyproject.toml"
-            # Install in editable mode with dev dependencies
             pip install -e ".[dev]" || pip install -e .
           elif [[ -f requirements.txt ]]; then
-            echo "Installing from requirements.txt"
             pip install -r requirements.txt
           else
-            echo "No dependency file found, installing basic dependencies"
             pip install requests boto3
           fi
-          
-          # Always install test/dev dependencies (if not already installed)
           pip install black isort ruff mypy pytest build wheel
-          
-          # Set PYTHONPATH for the entire job
           echo "PYTHONPATH=$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/plancosts" >> $GITHUB_ENV
-          
-          # Run make deps if available
           if grep -qE '^[[:space:]]*deps:' Makefile 2>/dev/null; then
             make deps || true
           fi
@@ -86,50 +76,53 @@ jobs:
       - name: Start mock pricing API
         shell: bash
         run: |
-          echo "Starting mock pricing API..."
-          # Run the mock price server
           python -m plancosts.tests.mock_price &
-          
-          # Wait for TCP port to be open
-          for i in $(seq 1 60); do
-            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
-              echo "Mock API is up."
-              break
-            fi
-            echo "Waiting for mock API (attempt $i/60)..."
+          echo $! > mock_pid.txt
+
+      - name: Wait for mock API readiness (POST /graphql)
+        shell: bash
+        run: |
+          i=0
+          code="000"
+          until [ $i -ge 60 ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:4000/graphql' || true)"
+            [ "$code" = "200" ] && echo "Mock API ready" && break
+            i=$((i+1))
             sleep 0.5
           done
-          
-          if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
-            echo "Warning: Mock API may not be running, continuing anyway"
-          fi
+          [ "$code" = "200" ] || { echo "Mock API failed readiness"; exit 1; }
 
       - name: CLI smoke tests with fixtures (table)
         env:
           PLANCOSTS_API_URL: http://127.0.0.1:4000
         shell: bash
         run: |
-          # Check for main entry points
           if [[ -f "main.py" ]]; then
             MAIN_SCRIPT="main.py"
           elif [[ -f "plancosts/main.py" ]]; then
             MAIN_SCRIPT="plancosts/main.py"
           else
-            echo "Warning: main.py not found in expected locations"
+            echo "No main.py found; skipping"
             exit 0
           fi
-          
-          echo "Using main script: $MAIN_SCRIPT"
-          
-          # Run smoke tests with available test files
+          ran_any=0
           for test_file in test_plan_ern.json test_plan_rds.json test_plan.json; do
             if [[ -f "$test_file" ]]; then
-              echo "Testing with $test_file..."
               python "$MAIN_SCRIPT" --tfjson "$test_file" -o table || true
+              ran_any=1
             elif [[ -f "plancosts/$test_file" ]]; then
-              echo "Testing with plancosts/$test_file..."
               python "$MAIN_SCRIPT" --tfjson "plancosts/$test_file" -o table || true
+              ran_any=1
             fi
           done
-          
-          echo "CLI smoke tests completed"
+          if [[ "$ran_any" -eq 0 ]]; then
+            echo "No test_plan*.json found; skipping CLI smoke tests."
+          fi
+
+      - name: Stop mock pricing API
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f mock_pid.txt ]]; then
+            kill "$(cat mock_pid.txt)" || true
+          fi

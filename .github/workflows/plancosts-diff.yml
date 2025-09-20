@@ -3,11 +3,11 @@ name: plancosts-diff
 on:
   pull_request:
     paths:
-      - '**/*.tf'
-      - '**/*.tfvars'
-      - 'plancosts/**'
-      - 'main.py'
-      - '.github/workflows/plancosts-diff.yml'
+      - "**/*.tf"
+      - "**/*.tfvars"
+      - "plancosts/**"
+      - "main.py"
+      - ".github/workflows/plancosts-diff.yml"
 
 permissions:
   contents: read
@@ -20,6 +20,7 @@ env:
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout base (merge target)
         uses: actions/checkout@v4
@@ -35,185 +36,169 @@ jobs:
           path: pr
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Set up Python (for mock server)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies from PR tree
+      - name: Install deps (PR tree) for mock server
         shell: bash
         working-directory: pr
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
-          
-          # Install the package with its dependencies using pyproject.toml
           if [[ -f pyproject.toml ]]; then
-            echo "Installing from pyproject.toml"
             pip install -e .
           elif [[ -f requirements.txt ]]; then
-            echo "Installing from requirements.txt"
             pip install -r requirements.txt
           else
-            echo "Installing basic dependencies"
-            pip install requests boto3 pytest
-          fi
-          
-          # Set PYTHONPATH for the entire job
-          echo "PYTHONPATH=$GITHUB_WORKSPACE/pr:$GITHUB_WORKSPACE/pr/plancosts" >> $GITHUB_ENV
-      
-      - name: Install dependencies in base tree
-        shell: bash
-        working-directory: base
-        run: |
-          # Also install deps in base to ensure it can run independently
-          if [[ -f pyproject.toml ]]; then
-            echo "Installing from pyproject.toml"
-            pip install -e .
-          elif [[ -f requirements.txt ]]; then
-            echo "Installing from requirements.txt"
-            pip install -r requirements.txt
-          else
-            echo "No dependency file in base, using minimal deps"
-            pip install requests boto3
+            pip install pytest
           fi
 
-      - name: Start mock pricing API
+      - name: Start mock pricing API (background with logs)
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -euxo pipefail
+          cd pr
+          nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+          echo $! > ../mock_pid.txt
+          sleep 1
+          # If dead, dump logs
+          if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
+            echo "Mock server exited immediately:"
+            sed -n '1,200p' ../mock_server.log || true
+            exit 1
+          fi
+
+      - name: Wait for mock API readiness (POST /graphql)
         shell: bash
         run: |
-          echo "Starting mock pricing API..."
-          # Run from PR directory but don't use working-directory
-          cd pr
-          python -m plancosts.tests.mock_price &
-          
-          # Wait for API to be ready
-          for i in $(seq 1 60); do
-            if (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
-              echo "Mock API is up."
-              break
-            fi
-            echo "Waiting for mock API (attempt $i/60)..."
+          set -euxo pipefail
+          i=0
+          code="000"
+          until [ $i -ge 60 ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
+            [ "$code" = "200" ] && echo "Mock API ready" && break
+            i=$((i+1))
             sleep 0.5
           done
-          
-          if ! (exec 3<>/dev/tcp/127.0.0.1/4000) 2>/dev/null; then
-            echo "Error: Mock API failed to start after 30 seconds."
+          if [ "$code" != "200" ]; then
+            echo "==== mock_server.log ===="
+            cat mock_server.log || true
             exit 1
           fi
 
-      - name: Run plancosts (base)
-        env:
-          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-          PYTHONPATH: ${{ github.workspace }}/base:${{ github.workspace }}/base/plancosts
-        shell: bash
-        run: |
-          echo "Running plancosts on base..."
-          cd base
-          
-          # Check if main.py exists in base
-          if [ -f "main.py" ]; then
-            if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
-              python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../base-plancosts.txt || { 
-                echo "plancosts failed on Terraform directory"
-                exit 1
-              }
-            elif [ -f "test_plan_ern.json" ]; then
-              python main.py --tfjson test_plan_ern.json -o table > ../base-plancosts.txt || {
-                echo "plancosts failed on test plan"
-                exit 1
-              }
-            else
-              echo "Warning: No Terraform directory or test plan found in base"
-              echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
-            fi
-          else
-            echo "Warning: main.py not found in base, using placeholder"
-            echo "OVERALL TOTAL: 0.00" > ../base-plancosts.txt
-          fi
-          
-          # Extract total
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../base-plancosts.txt > ../base-total.txt || {
-            echo "0.00" > ../base-total.txt
-            echo "Warning: No OVERALL TOTAL found in base output"
-          }
+      - name: Run plancosts (BASE) via external action
+        id: base
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
+        with:
+          file_prefix: base
+          terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
 
-      - name: Run plancosts (PR)
-        env:
-          PLANCOSTS_API_URL: ${{ env.PLANCOSTS_API_URL }}
-        shell: bash
-        run: |
-          echo "Running plancosts on PR..."
-          cd pr
-          
-          if [ -d "${{ env.TERRAFORM_DIR }}" ]; then
-            python main.py --tfdir ${{ env.TERRAFORM_DIR }} -o table > ../pr-plancosts.txt || {
-              echo "plancosts failed on Terraform directory"
-              exit 1
-            }
-          elif [ -f "test_plan_ern.json" ]; then
-            python main.py --tfjson test_plan_ern.json -o table > ../pr-plancosts.txt || {
-              echo "plancosts failed on test plan"
-              exit 1
-            }
-          else
-            echo "Error: No Terraform directory or test plan found in PR"
-            exit 1
-          fi
-          
-          # Extract total
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' ../pr-plancosts.txt > ../pr-total.txt || {
-            echo "0.00" > ../pr-total.txt
-            echo "Warning: No OVERALL TOTAL found in PR output"
-          }
+      - name: Run plancosts (PR) via external action
+        id: prrun
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
+        with:
+          file_prefix: pr
+          terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
 
       - name: Create diff
         shell: bash
         run: |
-          echo "Creating diff..."
-          diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
+          set -euxo pipefail
+          BASE_TXT="base-plancosts.txt"
+          PR_TXT="pr-plancosts.txt"
+          test -f "$BASE_TXT" || (echo "Missing $BASE_TXT" && exit 1)
+          test -f "$PR_TXT" || (echo "Missing $PR_TXT" && exit 1)
+
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" > base-total.txt || echo "0.00" > base-total.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   > pr-total.txt   || echo "0.00" > pr-total.txt
+
+          diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
 
       - name: Comment with cost diff
         if: always()
-        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          echo "Posting PR comment..."
-          old=$(cat base-total.txt || echo "0.00")
-          new=$(cat pr-total.txt || echo "0.00")
-          diff_content=$(cat diff.txt || echo "No differences detected")
-          
-          # Calculate percentage change using awk instead of bc
+          set -euo pipefail
+          old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
+          new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
+          diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
+
           change_text=""
-          if [[ "$old" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ "$new" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-            change_text=$(awk -v old="$old" -v new="$new" 'BEGIN {
-              if (old > 0) {
-                pct = ((new - old) / old) * 100;
-                printf " (%+.2f%%)", pct
-              }
-            }')
+          if echo "$old $new" | grep -Eq '^[0-9]+(\.[0-9]+)? [0-9]+(\.[0-9]+)?$' && [ "$old" != "0" ] && [ "$old" != "0.00" ]; then
+            change_text="$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')"
           fi
-          
-          # Create comment body - escape special characters properly
-          diff_escaped=$(echo "$diff_content" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-          
-          body=$(cat <<EOF
-{
-  "body": "## 💰 Cost Impact\n\n**Base monthly cost:** \${old}\n**PR monthly cost:** \${new}${change_text}\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n\`\`\`diff\n${diff_escaped}\n\`\`\`\n</details>"
-}
-EOF
-          )
-          
-          # Debug: Show what we're sending
-          echo "Sending comment body:"
-          echo "$body" | jq .
-          
-          # Post the comment
-          curl -L \
-            -X POST \
+
+          printf '%s' "$diff_content" > diff_body.txt
+          body="$(jq -n \
+            --arg old "$old" \
+            --arg new "$new" \
+            --arg change "$change_text" \
+            --rawfile diff diff_body.txt \
+            '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
+          )"
+
+          curl -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
+
+      - name: Start mock pricing API (background with logs)
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+          # Point directly at the *package parent* (inner plancosts package lives here)
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts
+        run: |
+          set -euxo pipefail
+          cd pr
+
+          echo "=== Verify import with PYTHONPATH=${PYTHONPATH} ==="
+          python - <<'PY'
+      import sys, importlib
+      print("sys.path[:3] =", sys.path[:3])
+      m = importlib.import_module("plancosts")
+      print("plancosts __file__:", getattr(m, "__file__", "<none>"))
+        try:
+            t = importlib.import_module("plancosts.tests.mock_price")
+            print("mock_price __file__:", getattr(t, "__file__", "<none>"))
+        except Exception as e:
+            print("IMPORT ERROR plancosts.tests.mock_price:", e)
+        PY
+
+            # Try module form first (fast path)
+            set +e
+            nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+            pid=$!
+            echo $pid > ../mock_pid.txt
+            sleep 1
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "Mock server started (module form) PID=$pid"
+              set -e
+            else
+              echo "Module form failed, trying direct script path..."
+              # Direct file path fallback; keeps PYTHONPATH so absolute imports work
+              nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
+              pid=$!
+              echo $pid > ../mock_pid.txt
+              sleep 1
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "Mock server exited immediately; showing log:"
+                sed -n '1,200p' ../mock_server.log || true
+                exit 1
+              fi
+              set -e
+              echo "Mock server started (file path) PID=$pid"
+            fi
+
+
+

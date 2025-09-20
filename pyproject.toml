@@ -26,8 +26,8 @@ dev = [
 [project.scripts]
 plancosts = "main:main"
 
-[tool.setuptools]
-packages = ["plancosts"]
+[tool.setuptools.packages.find]
+include = ["plancosts*"]
 
 [tool.setuptools.package-data]
 plancosts = ["tests/*.json", "*.json"]
