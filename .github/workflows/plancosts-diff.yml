@@ -156,16 +156,13 @@ jobs:
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
-          PYTHONPATH: ${{ github.workspace }}/pr
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts   # safe to keep for intra-package imports
         run: |
           set -euxo pipefail
           cd pr
-          nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
+          nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
-          if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
-            echo "Mock server exited immediately:"
-            sed -n '1,200p' ../mock_server.log || true
-            exit 1
-          fi
+          kill -0 "$(cat ../mock_pid.txt)"
+
 
