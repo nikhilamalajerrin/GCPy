@@ -15,6 +15,7 @@ permissions:
 
 env:
   TERRAFORM_DIR: examples/terraform_0_13
+  # This URL is used by steps running on the host runner (not inside Docker)
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
@@ -59,13 +60,14 @@ jobs:
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
+          # IMPORTANT: your real package is at pr/plancosts/** (inner dir)
+          PYTHONPATH: ${{ github.workspace }}/pr/plancosts
         run: |
           set -euxo pipefail
           cd pr
           nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
-          # If dead, dump logs
           if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
             echo "Mock server exited immediately:"
             sed -n '1,200p' ../mock_server.log || true
@@ -76,23 +78,26 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          i=0
-          code="000"
-          until [ $i -ge 60 ]; do
+          for i in {1..60}; do
             code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
-            [ "$code" = "200" ] && echo "Mock API ready" && break
-            i=$((i+1))
+            if [ "$code" = "200" ]; then
+              echo "Mock API ready"
+              exit 0
+            fi
             sleep 0.5
           done
-          if [ "$code" != "200" ]; then
-            echo "==== mock_server.log ===="
-            cat mock_server.log || true
-            exit 1
-          fi
+          echo "==== mock_server.log ===="
+          cat mock_server.log || true
+          exit 1
 
+      # IMPORTANT: the Docker action runs in a container; 127.0.0.1 is *inside the container*.
+      # Point it to the host's Docker bridge so it can reach the mock API.
+      # If 172.17.0.1 doesn't work in your runner, switch to http://host.docker.internal:4000
       - name: Run plancosts (BASE) via external action
         id: base
         uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
+        env:
+          PLANCOSTS_API_URL: http://172.17.0.1:4000
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
@@ -100,6 +105,8 @@ jobs:
       - name: Run plancosts (PR) via external action
         id: prrun
         uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.2
+        env:
+          PLANCOSTS_API_URL: http://172.17.0.1:4000
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
@@ -152,53 +159,12 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
 
-      - name: Start mock pricing API (background with logs)
+      - name: Stop mock pricing API
+        if: always()
         shell: bash
-        env:
-          PYTHONUNBUFFERED: "1"
-          # Point directly at the *package parent* (inner plancosts package lives here)
-          PYTHONPATH: ${{ github.workspace }}/pr/plancosts
         run: |
-          set -euxo pipefail
-          cd pr
-
-          echo "=== Verify import with PYTHONPATH=${PYTHONPATH} ==="
-          python - <<'PY'
-      import sys, importlib
-      print("sys.path[:3] =", sys.path[:3])
-      m = importlib.import_module("plancosts")
-      print("plancosts __file__:", getattr(m, "__file__", "<none>"))
-        try:
-            t = importlib.import_module("plancosts.tests.mock_price")
-            print("mock_price __file__:", getattr(t, "__file__", "<none>"))
-        except Exception as e:
-            print("IMPORT ERROR plancosts.tests.mock_price:", e)
-        PY
-
-            # Try module form first (fast path)
-            set +e
-            nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
-            pid=$!
-            echo $pid > ../mock_pid.txt
-            sleep 1
-            if kill -0 "$pid" 2>/dev/null; then
-              echo "Mock server started (module form) PID=$pid"
-              set -e
-            else
-              echo "Module form failed, trying direct script path..."
-              # Direct file path fallback; keeps PYTHONPATH so absolute imports work
-              nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
-              pid=$!
-              echo $pid > ../mock_pid.txt
-              sleep 1
-              if ! kill -0 "$pid" 2>/dev/null; then
-                echo "Mock server exited immediately; showing log:"
-                sed -n '1,200p' ../mock_server.log || true
-                exit 1
-              fi
-              set -e
-              echo "Mock server started (file path) PID=$pid"
-            fi
-
-
-
+          if [ -f mock_pid.txt ]; then
+            kill "$(cat mock_pid.txt)" || true
+          fi
+          echo "--- mock_server.log (tail) ---"
+          tail -n 200 mock_server.log || true
