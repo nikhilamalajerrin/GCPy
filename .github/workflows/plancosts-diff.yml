@@ -124,19 +124,20 @@ jobs:
           old=$(cat base-total.txt 2>/dev/null || echo "0.00")
           new=$(cat pr-total.txt 2>/dev/null || echo "0.00")
           diff_content=$(cat diff.txt 2>/dev/null || echo "No differences detected")
-
+          
           change_text=""
           if [[ "$old" =~ ^[0-9]+(\.[0-9]+)?$ && "$new" =~ ^[0-9]+(\.[0-9]+)?$ && "$old" != "0" && "$old" != "0.00" ]]; then
             change_text=$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')
           fi
-
-          diff_escaped=$(printf "%s" "$diff_content" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-
-          body=$(cat <<EOF
-{ "body": "## 💰 Cost Impact\n\n**Base monthly cost:** \${old}\n**PR monthly cost:** \${new}${change_text}\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n\`\`\`diff\n${diff_escaped}\n\`\`\`\n</details>" }
-EOF
-          )
-
+          
+          # Use jq to properly escape and create JSON
+          body=$(jq -n \
+            --arg old "$old" \
+            --arg new "$new" \
+            --arg change "$change_text" \
+            --arg diff "$diff_content" \
+            '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}')
+          
           curl -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
