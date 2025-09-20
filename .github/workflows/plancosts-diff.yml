@@ -65,7 +65,6 @@ jobs:
           nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
-          # If dead, dump logs
           if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
             echo "Mock server exited immediately:"
             sed -n '1,200p' ../mock_server.log || true
@@ -112,10 +111,8 @@ jobs:
           PR_TXT="pr-plancosts.txt"
           test -f "$BASE_TXT" || (echo "Missing $BASE_TXT" && exit 1)
           test -f "$PR_TXT" || (echo "Missing $PR_TXT" && exit 1)
-
           awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" > base-total.txt || echo "0.00" > base-total.txt
           awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   > pr-total.txt   || echo "0.00" > pr-total.txt
-
           diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
@@ -130,12 +127,10 @@ jobs:
           old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
           new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
           diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
-
           change_text=""
           if echo "$old $new" | grep -Eq '^[0-9]+(\.[0-9]+)? [0-9]+(\.[0-9]+)?$' && [ "$old" != "0" ] && [ "$old" != "0.00" ]; then
             change_text="$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')"
           fi
-
           printf '%s' "$diff_content" > diff_body.txt
           body="$(jq -n \
             --arg old "$old" \
@@ -144,7 +139,6 @@ jobs:
             --rawfile diff diff_body.txt \
             '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
           )"
-
           curl -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -152,53 +146,12 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
 
-      - name: Start mock pricing API (background with logs)
+      - name: Stop mock pricing API
+        if: always()
         shell: bash
-        env:
-          PYTHONUNBUFFERED: "1"
-          # Point directly at the *package parent* (inner plancosts package lives here)
-          PYTHONPATH: ${{ github.workspace }}/pr/plancosts
         run: |
-          set -euxo pipefail
-          cd pr
-
-          echo "=== Verify import with PYTHONPATH=${PYTHONPATH} ==="
-          python - <<'PY'
-      import sys, importlib
-      print("sys.path[:3] =", sys.path[:3])
-      m = importlib.import_module("plancosts")
-      print("plancosts __file__:", getattr(m, "__file__", "<none>"))
-        try:
-            t = importlib.import_module("plancosts.tests.mock_price")
-            print("mock_price __file__:", getattr(t, "__file__", "<none>"))
-        except Exception as e:
-            print("IMPORT ERROR plancosts.tests.mock_price:", e)
-        PY
-
-            # Try module form first (fast path)
-            set +e
-            nohup python -m plancosts.tests.mock_price > ../mock_server.log 2>&1 &
-            pid=$!
-            echo $pid > ../mock_pid.txt
-            sleep 1
-            if kill -0 "$pid" 2>/dev/null; then
-              echo "Mock server started (module form) PID=$pid"
-              set -e
-            else
-              echo "Module form failed, trying direct script path..."
-              # Direct file path fallback; keeps PYTHONPATH so absolute imports work
-              nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
-              pid=$!
-              echo $pid > ../mock_pid.txt
-              sleep 1
-              if ! kill -0 "$pid" 2>/dev/null; then
-                echo "Mock server exited immediately; showing log:"
-                sed -n '1,200p' ../mock_server.log || true
-                exit 1
-              fi
-              set -e
-              echo "Mock server started (file path) PID=$pid"
-            fi
-
-
-
+          if [[ -f mock_pid.txt ]]; then
+            kill "$(cat mock_pid.txt)" || true
+          fi
+          echo "--- mock_server.log (tail) ---"
+          tail -n 100 mock_server.log || true
