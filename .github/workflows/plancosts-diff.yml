@@ -97,24 +97,23 @@ jobs:
       - name: Run plancosts (BASE) via external action
         id: base
         uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.6
+        env:
+          # IMPORTANT: inside the Docker action, "localhost" is the container.
+          # Use the runner-host alias so the action can reach the mock server.
+          PLANCOSTS_API_URL: http://host.docker.internal:4000
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
-        env:
-          # Inside the docker *action* container, 127.0.0.1 is the container.
-          # Use host gateway to reach the mock server running on the host VM:
-          PLANCOSTS_API_URL: http://172.17.0.1:4000
 
       # -------------------- RUN EXTERNAL ACTION (PR) --------------------
       - name: Run plancosts (PR) via external action
         id: prrun
         uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.6
+        env:
+          PLANCOSTS_API_URL: http://host.docker.internal:4000
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
-        env:
-          PLANCOSTS_API_URL: http://172.17.0.1:4000
-
       - name: Create diff
         shell: bash
         run: |
