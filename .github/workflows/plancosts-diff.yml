@@ -115,7 +115,7 @@ jobs:
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
 
-        - name: Comment with cost diff (Infracost-style)
+      - name: Comment with cost diff (Infracost-style)
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
