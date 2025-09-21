@@ -125,7 +125,7 @@ jobs:
           echo "---- base-plancosts.txt (tail) ----"; tail -n 50 base-plancosts.txt || true
           echo "---- pr-plancosts.txt (tail) ----";   tail -n 50 pr-plancosts.txt || true
 
-      - name: Comment with cost diff (Infracost-style)
+      - name: Comment with cost diff (fixed negative formatting)
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -133,27 +133,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE_TXT="base-plancosts.txt"
-          PR_TXT="pr-plancosts.txt"
-
-          old="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" 2>/dev/null || echo "0.00")"
-          new="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   2>/dev/null || echo "0.00")"
+          old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
+          new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
           f_old="$(awk -v n="$old" 'BEGIN{printf "%.2f", n+0}')"
           f_new="$(awk -v n="$new" 'BEGIN{printf "%.2f", n+0}')"
           diff_amt="$(awk -v o="$old" -v n="$new" 'BEGIN{printf "%.2f", (n+0)-(o+0)}')"
+
+          # ✅ show a single sign and an absolute dollar value
           sign="$(awk -v d="$diff_amt" 'BEGIN{ if (d+0>0) print "+"; else if (d+0<0) print "−"; else print "" }')"
+          abs_amt="$(awk -v d="$diff_amt" 'BEGIN{ if (d+0<0) d=-d; printf "%.2f", d+0 }')"
+
+          # ✅ print a single percent sign
           pct_text="$(awk -v o="$old" -v n="$new" 'BEGIN{
             o+=0; n+=0;
             if (o==0 && n==0) { printf "(+0.00%%)"; exit }
             if (o==0 && n>0)  { printf "(new)";    exit }
             if (o==0 && n<0)  { printf "(n/a)";    exit }
-            pct = (n-o)/o*100.0; printf "(%+0.2f%%%%)", pct
+            pct = (n-o)/o*100.0; printf "(%+0.2f%%)", pct
           }')"
-          diff_cell="${sign}\$${diff_amt} ${pct_text}"
-          headline="$(awk -v d="$diff_amt" 'BEGIN{ d+=0; if (d>0) print "increase"; else if (d<0) print "decrease"; else print "stay the same"; }')"
 
-          diff_content="$(diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 || true)"
-          if [[ -z "$diff_content" ]]; then diff_content="No differences detected"; fi
+          diff_cell="${sign}\$${abs_amt} ${pct_text}"
+          headline="$(awk -v d="$diff_amt" 'BEGIN{ d+=0; if (d>0) print "increase"; else if (d<0) print "decrease"; else print "stay the same"; }')"
+          diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
 
           body="$(jq -n --arg headline "$headline" \
                        --arg f_old "$f_old" \
@@ -165,7 +166,7 @@ jobs:
             {
               body:
               ("💰 **Plancosts estimate:** monthly cost will " + $headline + " " +
-               "($" + ( ($diff_cell | capture("(?<sign>[+-]?)(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
+               "($" + ( ($diff_cell | capture("(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
                "| Project | Previous | New | Diff |\n" +
                "|---|---:|---:|---:|\n" +
                "| " + $proj + " | $" + $f_old + " | $" + $f_new + " | " + $diff_cell + " |\n" +
@@ -180,6 +181,7 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
+
 
       - name: Show mock log tail (if present)
         if: always()
