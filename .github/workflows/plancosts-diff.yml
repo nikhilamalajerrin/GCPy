@@ -6,6 +6,7 @@ on:
       - "**/*.tf"
       - "**/*.tfvars"
       - "plancosts/**"
+      - "examples/terraform_0_13/plan.json"
       - "main.py"
       - ".github/workflows/plancosts-diff.yml"
 
@@ -20,13 +21,12 @@ env:
 jobs:
   cost-diff:
     runs-on: ubuntu-latest
-
     steps:
-      # --- Check out MAIN and PR into different folders ---
-      - name: Checkout base (MAIN)
+      # --- checkout main and PR into separate folders ---
+      - name: Checkout base (main)
         uses: actions/checkout@v4
         with:
-          ref: refs/heads/main      # <— force main as the base
+          ref: refs/heads/main
           path: base
           fetch-depth: 0
 
@@ -37,14 +37,13 @@ jobs:
           path: pr
           fetch-depth: 0
 
-      # --- Start mock pricing API from the PR tree (so code changes apply) ---
-      - name: Set up Python (for mock server)
+      # --- start the mock price API from PR code (so any code changes are used) ---
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps in PR tree (for mock server)
-        shell: bash
+      - name: Install plancosts deps (from PR tree)
         working-directory: pr
         run: |
           set -euxo pipefail
@@ -54,11 +53,10 @@ jobs:
           elif [[ -f requirements.txt ]]; then
             pip install -r requirements.txt
           else
-            pip install pytest
+            pip install gcpy-plancosts
           fi
 
       - name: Start mock pricing API
-        shell: bash
         env:
           PYTHONUNBUFFERED: "1"
           PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
@@ -71,7 +69,6 @@ jobs:
           kill -0 "$(cat ../mock_pid.txt)"
 
       - name: Wait for mock API readiness
-        shell: bash
         run: |
           set -euxo pipefail
           for i in {1..60}; do
@@ -82,63 +79,47 @@ jobs:
           echo "Mock not ready. Log tail:"; tail -n 200 mock_server.log || true
           exit 1
 
-      # --- Sanity: show which dirs will be priced ---
-      - name: Sanity print target dirs
-        run: |
-          echo "BASE dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}"
-          ls -la  ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }} || true
-          echo "PR dir:   ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}"
-          ls -la  ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }} || true
-
-      # --- Run plancosts on MAIN tree (base) ---
-      - name: Run plancosts (BASE) via external action
-        id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.15
-        with:
-          file_prefix: base
-          terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000
-
-      # --- Run plancosts on PR tree ---
-      - name: Run plancosts (PR) via external action
-        id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.15
-        with:
-          file_prefix: pr
-          terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000
-
-      # --- Create diff + totals ---
-      - name: Create diff
-        shell: bash
+      # --- run plancosts directly against explicit plan.json files ---
+      - name: Price MAIN plan.json
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
           set -euxo pipefail
-          BASE_TXT="base-plancosts.txt"
-          PR_TXT="pr-plancosts.txt"
-          test -f "$BASE_TXT" || (echo "Missing $BASE_TXT" && exit 1)
-          test -f "$PR_TXT" || (echo "Missing $PR_TXT" && exit 1)
+          BASE_JSON="${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}/plan.json"
+          test -f "$BASE_JSON"
+          echo "Using BASE plan: $BASE_JSON"
+          python -m plancosts.main --api-url http://host.docker.internal:4000 --tfjson "$BASE_JSON" | tee base-plancosts.txt
 
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" > base-total.txt || echo "0.00" > base-total.txt
-          awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   > pr-total.txt   || echo "0.00" > pr-total.txt
+      - name: Price PR plan.json
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
+        run: |
+          set -euxo pipefail
+          PR_JSON="${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}/plan.json"
+          test -f "$PR_JSON"
+          echo "Using PR plan:   $PR_JSON"
+          python -m plancosts.main --api-url http://host.docker.internal:4000 --tfjson "$PR_JSON" | tee pr-plancosts.txt
 
-          diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 > diff.txt || true
+      # --- compute diff and totals ---
+      - name: Create diff & totals
+        run: |
+          set -euxo pipefail
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' base-plancosts.txt > base-total.txt || echo "0.00" > base-total.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' pr-plancosts.txt   > pr-total.txt   || echo "0.00" > pr-total.txt
+          diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
 
-      # --- PR comment (Infracost-style) ---
-      - name: Comment with cost diff (Infracost-style)
+      # --- comment on the PR (Infracost-style) ---
+      - name: Comment with cost diff
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROJECT_NAME: ${{ github.repository }} / ${{ env.TERRAFORM_DIR }}
-        shell: bash
         run: |
           set -euo pipefail
-          BASE_TXT="base-plancosts.txt"
-          PR_TXT="pr-plancosts.txt"
-
-          old="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" 2>/dev/null || echo "0.00")"
-          new="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   2>/dev/null || echo "0.00")"
+          old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
+          new="$(cat pr-total.txt   2>/dev/null || echo "0.00")"
           f_old="$(awk -v n="$old" 'BEGIN{printf "%.2f", n+0}')"
           f_new="$(awk -v n="$new" 'BEGIN{printf "%.2f", n+0}')"
           diff_amt="$(awk -v o="$old" -v n="$new" 'BEGIN{printf "%.2f", (n+0)-(o+0)}')"
@@ -148,32 +129,24 @@ jobs:
             if (o==0 && n==0) { printf "(+0.00%%)"; exit }
             if (o==0 && n>0)  { printf "(new)";    exit }
             if (o==0 && n<0)  { printf "(n/a)";    exit }
-            pct = (n-o)/o*100.0; printf "(%+0.2f%%%%)", pct
+            printf "(%+0.2f%%%%)", (n-o)/o*100.0
           }')"
           diff_cell="${sign}\$${diff_amt} ${pct_text}"
           headline="$(awk -v d="$diff_amt" 'BEGIN{ d+=0; if (d>0) print "increase"; else if (d<0) print "decrease"; else print "stay the same"; }')"
-
-          diff_content="$(diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 || true)"
+          diff_content="$(cat diff.txt)"
           if [[ -z "$diff_content" ]]; then diff_content="No differences detected"; fi
 
-          body="$(jq -n --arg headline "$headline" \
-                       --arg f_old "$f_old" \
-                       --arg f_new "$f_new" \
-                       --arg diff_cell "$diff_cell" \
-                       --arg proj "${PROJECT_NAME:-project}" \
-                       --arg diff "$diff_content" \
-            '
-            {
-              body:
+          body="$(jq -n --arg headline "$headline" --arg f_old "$f_old" --arg f_new "$f_new" \
+                       --arg diff_cell "$diff_cell" --arg proj "${PROJECT_NAME:-project}" --arg diff "$diff_content" '
+            { body:
               ("💰 **Plancosts estimate:** monthly cost will " + $headline + " " +
-               "($" + ( ($diff_cell | capture("(?<sign>[+-]?)(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
+               "($" + ( ($diff_cell | capture("(?<sign>[+−-]?)(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
                "| Project | Previous | New | Diff |\n" +
                "|---|---:|---:|---:|\n" +
                "| " + $proj + " | $" + $f_old + " | $" + $f_new + " | " + $diff_cell + " |\n" +
                "| **All projects** | **$" + $f_old + "** | **$" + $f_new + "** | **" + $diff_cell + "** |\n\n" +
                "<details><summary>📊 **Detailed plancosts diff**</summary>\n\n```diff\n" +
-               $diff + "\n```\n</details>\n")
-            }')"
+               $diff + "\n```\n</details>\n") }')"
 
           curl -sS -L -X POST \
             -H "Accept: application/vnd.github+json" \
