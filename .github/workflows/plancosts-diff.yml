@@ -96,7 +96,7 @@ jobs:
       # -------------------- RUN EXTERNAL ACTION (BASE) --------------------
       - name: Run plancosts (BASE) via external action
         id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.6
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.7
         env:
           # IMPORTANT: inside the Docker action, "localhost" is the container.
           # Use the runner-host alias so the action can reach the mock server.
@@ -108,7 +108,7 @@ jobs:
       # -------------------- RUN EXTERNAL ACTION (PR) --------------------
       - name: Run plancosts (PR) via external action
         id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.6
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.7
         env:
           PLANCOSTS_API_URL: http://host.docker.internal:4000
         with:
