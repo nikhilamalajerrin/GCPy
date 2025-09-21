@@ -312,7 +312,7 @@ if __name__ == "__main__":
         _run_self_tests()
     else:
         print(
-            "Mock pricing API on http://127.0.0.1:4000/  (set PLANCOSTS_API_URL=http://127.0.0.1:4000)"
+            "Mock pricing API on http://0.0.0.0:4000/  (set PLANCOSTS_API_URL=http://127.0.0.1:4000)"
         )
         print(f"MODE={MODE}  DEFAULT_PRICE={DEFAULT_PRICE}")
         for k, v in OVERRIDE.items():
