@@ -115,47 +115,93 @@ jobs:
           echo "Base total: $(cat base-total.txt)"
           echo "PR total:   $(cat pr-total.txt)"
 
-      - name: Comment with cost diff
+        - name: Comment with cost diff (Infracost-style)
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # for the “Project” column label; tweak if you want a different name
+          PROJECT_NAME: ${{ github.repository }} / ${{ env.TERRAFORM_DIR }}
         shell: bash
         run: |
           set -euo pipefail
 
-          old="$(cat base-total.txt 2>/dev/null || echo "0")"
-          new="$(cat pr-total.txt 2>/dev/null || echo "0")"
-          diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
+          # Inputs
+          BASE_TXT="base-plancosts.txt"
+          PR_TXT="pr-plancosts.txt"
 
-          change_text=""
-          
-          if awk -v o="$old" 'BEGIN{ exit !( (o+0) > 0 ) }'; then
-            change_text="$(awk -v old="$old" -v new="$new" 'BEGIN{
-              old+=0; new+=0;
-              pct = (new-old)/old*100;
-              printf " (%+.2f%%)", pct
-            }')"
-          
-          elif awk -v o="$old" -v n="$new" 'BEGIN{ exit !( (o+0)==0 && (n+0)>0 ) }'; then
-            change_text=" (new from \$0)"
+          # Totals (fallback to 0.00 if not found)
+          old="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" 2>/dev/null || echo "0.00")"
+          new="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   2>/dev/null || echo "0.00")"
+
+          # Format to 2 dp
+          f_old="$(awk -v n="$old" 'BEGIN{printf "%.2f", n+0}')"
+          f_new="$(awk -v n="$new" 'BEGIN{printf "%.2f", n+0}')"
+
+          # Diff & percent
+          diff_amt="$(awk -v o="$old" -v n="$new" 'BEGIN{printf "%.2f", (n+0)-(o+0)}')"
+
+          # sign prefix for diff & emoji for direction
+          sign="$(awk -v d="$diff_amt" 'BEGIN{ if (d+0>0) print "+"; else if (d+0<0) print "−"; else print "" }')"
+          emoji="$(awk -v d="$diff_amt" 'BEGIN{ if (d+0>0) print "📈"; else if (d+0<0) print "📉"; else print "➖" }')"
+
+          # Percent change (handle divide by zero cases like Infracost)
+          pct_text="$(awk -v o="$old" -v n="$new" 'BEGIN{
+            o+=0; n+=0;
+            if (o==0 && n==0) { printf "(+0.00%%)"; exit }
+            if (o==0 && n>0)  { printf "(new)";    exit }
+            if (o==0 && n<0)  { printf "(n/a)";    exit }
+            pct = (n-o)/o*100.0;
+            printf "(%+0.2f%%%%)", pct
+          }')"
+
+          # Table row text for Diff column (amount + percent)
+          diff_cell="${sign}\$${diff_amt} ${pct_text}"
+
+          # Headline sentence (matches Infracost wording)
+          headline="$(awk -v d="$diff_amt" 'BEGIN{
+            d+=0;
+            if (d>0)  print "increase";
+            else if (d<0) print "decrease";
+            else           print "stay the same";
+          }')"
+
+          # Collapsible diff block content (or a placeholder)
+          diff_content="$(diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 || true)"
+          if [[ -z "$diff_content" ]]; then
+            diff_content="No differences detected"
           fi
 
-          printf '%s' "$diff_content" > diff_body.txt
+          # Build markdown body
+          body="$(jq -n --arg headline "$headline" \
+                       --arg f_old "$f_old" \
+                       --arg f_new "$f_new" \
+                       --arg diff_cell "$diff_cell" \
+                       --arg proj "${PROJECT_NAME:-project}" \
+                       --arg diff "$diff_content" \
+            '
+            {
+              body:
+              ("💰 **Plancosts estimate:** monthly cost will " + $headline + " " +
+               "($" + ( ($diff_cell | capture("(?<sign>[+−-]?)(?<val>[0-9.]+)")).val ) + ") " +
+               (if ($diff_cell | contains("(new)")) then "📈" else "📊" end) + "\n\n" +
 
-          body="$(jq -n \
-            --arg old "$old" \
-            --arg new "$new" \
-            --arg change "$change_text" \
-            --rawfile diff diff_body.txt \
-            '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
-          )"
+               "| Project | Previous | New | Diff |\n" +
+               "|---|---:|---:|---:|\n" +
+               "| " + $proj + " | $" + $f_old + " | $" + $f_new + " | " + $diff_cell + " |\n" +
+               "| **All projects** | **$" + $f_old + "** | **$" + $f_new + "** | **" + $diff_cell + "** |\n\n" +
 
+               "<details><summary>📊 **Detailed plancosts diff**</summary>\n\n```diff\n" +
+               $diff + "\n```\n</details>\n")
+            }')"
+
+          # Post PR comment
           curl -sS -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
+
 
 
       - name: Show mock log tail (if present)
