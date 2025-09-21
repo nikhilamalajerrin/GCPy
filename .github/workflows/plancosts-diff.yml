@@ -122,16 +122,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
-          new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
+
+          old="$(cat base-total.txt 2>/dev/null || echo "0")"
+          new="$(cat pr-total.txt 2>/dev/null || echo "0")"
           diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
 
           change_text=""
-          if echo "$old $new" | grep -Eq '^[0-9]+(\.[0-9]+)? [0-9]+(\.[0-9]+)?$' && [ "$old" != "0" ] && [ "$old" != "0.00" ]; then
-            change_text="$(awk -v old="$old" -v new="$new" 'BEGIN { pct=((new-old)/old)*100; printf " (%+.2f%%)", pct }')"
+          
+          if awk -v o="$old" 'BEGIN{ exit !( (o+0) > 0 ) }'; then
+            change_text="$(awk -v old="$old" -v new="$new" 'BEGIN{
+              old+=0; new+=0;
+              pct = (new-old)/old*100;
+              printf " (%+.2f%%)", pct
+            }')"
+          
+          elif awk -v o="$old" -v n="$new" 'BEGIN{ exit !( (o+0)==0 && (n+0)>0 ) }'; then
+            change_text=" (new from \$0)"
           fi
 
           printf '%s' "$diff_content" > diff_body.txt
+
           body="$(jq -n \
             --arg old "$old" \
             --arg new "$new" \
@@ -139,12 +149,14 @@ jobs:
             --rawfile diff diff_body.txt \
             '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
           )"
+
           curl -sS -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
+
 
       - name: Show mock log tail (if present)
         if: always()
