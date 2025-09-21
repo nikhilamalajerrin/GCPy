@@ -124,7 +124,7 @@
                   "iops": 0,
                   "multi_attach_enabled": null,
                   "outpost_arn": null,
-                  "size": 20,
+                  "size": 200,
                   "tags": null,
                   "type": "io1"
                 }
