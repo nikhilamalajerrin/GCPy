@@ -2294,7 +2294,7 @@
                       "constant_value": 0
                     },
                     "size": {
-                      "constant_value": 20
+                      "constant_value": 40
                     },
                     "type": {
                       "constant_value": "io1"
