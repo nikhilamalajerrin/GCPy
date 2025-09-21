@@ -15,7 +15,6 @@ permissions:
 
 env:
   TERRAFORM_DIR: examples/terraform_0_13
-  # This is correct for steps running on the host VM:
   PLANCOSTS_API_URL: http://127.0.0.1:4000
 
 jobs:
@@ -42,7 +41,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps (PR tree) for mock server
+      - name: Install deps in PR tree (for mock server)
         shell: bash
         working-directory: pr
         run: |
@@ -56,60 +55,50 @@ jobs:
             pip install pytest
           fi
 
-      - name: Start mock pricing API (background with logs)
+      - name: Start mock pricing API
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
+          # Make sure package imports resolve
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
           set -euxo pipefail
           cd pr
-          # Make sure in-repo imports work when running the test server by file path
-          export PYTHONPATH="$PWD:$PWD/plancosts:${PYTHONPATH:-}"
-
-          # Run the server by file path so it works even if plancosts.tests isn't in the wheel
           nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
           sleep 1
+          kill -0 "$(cat ../mock_pid.txt)"
 
-          if ! kill -0 "$(cat ../mock_pid.txt)" 2>/dev/null; then
-            echo "Mock server exited immediately:"
-            sed -n '1,200p' ../mock_server.log || true
-            exit 1
-          fi
-
-      - name: Wait for mock API readiness (POST /graphql)
+      - name: Wait for mock API readiness
         shell: bash
         run: |
           set -euxo pipefail
           for i in {1..60}; do
             code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PLANCOSTS_API_URL}/graphql" || true)"
-            if [ "$code" = "200" ]; then
-              echo "Mock API ready"
-              exit 0
-            fi
+            [[ "$code" = "200" ]] && echo "Mock API ready" && exit 0
             sleep 0.5
           done
-          echo "==== mock_server.log ===="
-          cat mock_server.log || true
+          echo "Mock not ready. Log tail:"; tail -n 200 mock_server.log || true
           exit 1
 
-      # -------------------- RUN EXTERNAL ACTION (BASE) --------------------
+      # BASE
       - name: Run plancosts (BASE) via external action
         id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.8
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.9
         with:
           file_prefix: base
           terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000  # <-- important
+          api_url: http://host.docker.internal:4000
 
-      # -------------------- RUN EXTERNAL ACTION (PR) --------------------
+      # PR
       - name: Run plancosts (PR) via external action
         id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.8
+        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.9
         with:
           file_prefix: pr
           terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000  # <-- important
+          api_url: http://host.docker.internal:4000
+
       - name: Create diff
         shell: bash
         run: |
@@ -150,20 +139,17 @@ jobs:
             --rawfile diff diff_body.txt \
             '{body: ("## 💰 Cost Impact\n\n**Base monthly cost:** $" + $old + "\n**PR monthly cost:** $" + $new + $change + "\n\n<details><summary>📊 Detailed plancosts diff</summary>\n\n```diff\n" + $diff + "\n```\n</details>")}'
           )"
-
-          curl -L -X POST \
+          curl -sS -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
 
-      - name: Stop mock pricing API
+      - name: Show mock log tail (if present)
         if: always()
-        shell: bash
         run: |
           if [[ -f pr/mock_pid.txt ]]; then
-            kill "$(cat pr/mock_pid.txt)" || true
+            echo "--- mock_server.log (tail) ---"
+            tail -n 200 mock_server.log || true
           fi
-          echo "--- mock_server.log (tail) ---"
-          tail -n 100 mock_server.log || true
