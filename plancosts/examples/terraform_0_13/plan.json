@@ -191,7 +191,7 @@
                   "availability_zone": "us-east-1a",
                   "multi_attach_enabled": null,
                   "outpost_arn": null,
-                  "size": 30,
+                  "size": 50,
                   "tags": null,
                   "type": "standard"
                 }

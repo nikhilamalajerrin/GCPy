@@ -11,7 +11,13 @@ requires-python = ">=3.10"
 dependencies = [
     "requests>=2.28.0",
     "boto3>=1.26.0",
+    "click>=8.1.0",        
+    # "python-dotenv>=1.0" # optional; only if you want .env loading guaranteed
 ]
+
+[project.scripts]
+plancosts = "plancosts.main:main"  # ← Fix module path
+
 
 [project.optional-dependencies]
 dev = [
@@ -22,9 +28,6 @@ dev = [
     "ruff>=0.0.260",
     "mypy>=1.0.0",
 ]
-
-[project.scripts]
-plancosts = "main:main"
 
 [tool.setuptools.packages.find]
 include = ["plancosts*"]
