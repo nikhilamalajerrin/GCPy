@@ -6,7 +6,6 @@ on:
       - "**/*.tf"
       - "**/*.tfvars"
       - "plancosts/**"
-      - "examples/terraform_0_13/plan.json"
       - "main.py"
       - ".github/workflows/plancosts-diff.yml"
 
@@ -23,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --- Check out MAIN and PR into different folders ---
+      # Checkout MAIN and PR into separate folders
       - name: Checkout base (MAIN)
         uses: actions/checkout@v4
         with:
@@ -38,13 +37,13 @@ jobs:
           path: pr
           fetch-depth: 0
 
-      # --- Start mock pricing API from the PR tree ---
-      - name: Set up Python (for mock server)
+      # Start mock pricing API from PR tree (so code-under-review is used)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps in PR tree (for mock server)
+      - name: Install deps from PR tree (for mock server + cli)
         shell: bash
         working-directory: pr
         run: |
@@ -58,7 +57,7 @@ jobs:
             pip install pytest
           fi
 
-      - name: Start mock pricing API (accessible from Docker)
+      - name: Start mock pricing API
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
@@ -66,10 +65,9 @@ jobs:
         run: |
           set -euxo pipefail
           cd pr
-          # Bind to 0.0.0.0 so Docker containers can reach it via host.docker.internal
           nohup python plancosts/plancosts/tests/mock_price.py > ../mock_server.log 2>&1 &
           echo $! > ../mock_pid.txt
-          sleep 2
+          sleep 1
           kill -0 "$(cat ../mock_pid.txt)"
 
       - name: Wait for mock API readiness
@@ -84,110 +82,49 @@ jobs:
           echo "Mock not ready. Log tail:"; tail -n 200 mock_server.log || true
           exit 1
 
-      # --- Verify Terraform directories ---
-      - name: Verify Terraform directories
+      # Sanity check the plan.json files
+      - name: Verify plan.json exists in MAIN and PR
+        shell: bash
         run: |
-          echo "BASE dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}"
-          ls -la "${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}" || true
-          echo "PR dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}"
-          ls -la "${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}" || true
+          set -euxo pipefail
+          BASE_JSON="${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}/plan.json"
+          PR_JSON="${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}/plan.json"
+          test -f "$BASE_JSON" || { echo "Missing $BASE_JSON"; exit 1; }
+          test -f "$PR_JSON"   || { echo "Missing $PR_JSON"; exit 1; }
+          echo "SHA256 (MAIN): $(sha256sum "$BASE_JSON" | cut -d' ' -f1)"
+          echo "SHA256 (PR):   $(sha256sum "$PR_JSON"   | cut -d' ' -f1)"
 
-      # --- Run plancosts on MAIN tree (base) via Docker action ---
-      - name: Run plancosts (BASE) via Docker action
-        id: base
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.15
-        with:
-          file_prefix: base
-          terraform_dir: ${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000
+      # Run plancosts locally (NOT in Docker) so paths stay correct
+      - name: Run plancosts on MAIN plan.json
+        shell: bash
         env:
-          # Ensure the Docker container can reach the host API
-          USE_TFDIR: "1"  # Enable real Terraform execution if supported
-
-      # --- Run plancosts on PR tree via Docker action ---
-      - name: Run plancosts (PR) via Docker action
-        id: prrun
-        uses: nikhilamalajerrin/james-tf-action/.github/actions/plancosts@v0.1.15
-        with:
-          file_prefix: pr
-          terraform_dir: ${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}
-          api_url: http://host.docker.internal:4000
-        env:
-          # Ensure the Docker container can reach the host API
-          USE_TFDIR: "1"  # Enable real Terraform execution if supported
-
-      # --- Verify outputs were created ---
-      - name: Verify plancosts outputs
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
         run: |
-          echo "=== Checking for output files ==="
-          ls -la base-plancosts.txt pr-plancosts.txt || true
-          
-          if [[ -f base-plancosts.txt ]]; then
-            echo "=== BASE OUTPUT ==="
-            cat base-plancosts.txt
-          else
-            echo "ERROR: base-plancosts.txt not found"
-          fi
-          
-          if [[ -f pr-plancosts.txt ]]; then
-            echo "=== PR OUTPUT ==="
-            cat pr-plancosts.txt
-          else
-            echo "ERROR: pr-plancosts.txt not found"
-          fi
+          set -euxo pipefail
+          BASE_JSON="${{ github.workspace }}/base/${{ env.TERRAFORM_DIR }}/plan.json"
+          python -m plancosts.main --api-url "${PLANCOSTS_API_URL}" --tfjson "$BASE_JSON" | tee base-plancosts.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' base-plancosts.txt > base-total.txt || echo "0.00" > base-total.txt
 
-      # --- Create diff + totals ---
+      - name: Run plancosts on PR plan.json
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pr:${{ github.workspace }}/pr/plancosts
+        run: |
+          set -euxo pipefail
+          PR_JSON="${{ github.workspace }}/pr/${{ env.TERRAFORM_DIR }}/plan.json"
+          python -m plancosts.main --api-url "${PLANCOSTS_API_URL}" --tfjson "$PR_JSON" | tee pr-plancosts.txt
+          awk '/^OVERALL TOTAL/ {print $NF; exit}' pr-plancosts.txt > pr-total.txt || echo "0.00" > pr-total.txt
+
       - name: Create diff
         shell: bash
         run: |
           set -euxo pipefail
-          BASE_TXT="base-plancosts.txt"
-          PR_TXT="pr-plancosts.txt"
-          
-          if [[ ! -f "$BASE_TXT" ]]; then
-            echo "ERROR: Missing $BASE_TXT"
-            echo "0.00" > base-total.txt
-          else
-            awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" > base-total.txt || echo "0.00" > base-total.txt
-          fi
-          
-          if [[ ! -f "$PR_TXT" ]]; then
-            echo "ERROR: Missing $PR_TXT"
-            echo "0.00" > pr-total.txt
-          else
-            awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT" > pr-total.txt || echo "0.00" > pr-total.txt
-          fi
+          diff -u base-plancosts.txt pr-plancosts.txt | tail -n +3 > diff.txt || true
+          echo "Base total: $(cat base-total.txt)"
+          echo "PR total:   $(cat pr-total.txt)"
+          echo "---- base-plancosts.txt (tail) ----"; tail -n 50 base-plancosts.txt || true
+          echo "---- pr-plancosts.txt (tail) ----";   tail -n 50 pr-plancosts.txt || true
 
-          base_total="$(cat base-total.txt)"
-          pr_total="$(cat pr-total.txt)"
-          
-          echo "Base total: $base_total"
-          echo "PR total: $pr_total"
-          
-          # Create diff only if both files exist
-          if [[ -f "$BASE_TXT" && -f "$PR_TXT" ]]; then
-            diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 > diff.txt || true
-          else
-            echo "Cannot create diff - missing output files" > diff.txt
-          fi
-
-      # --- Enhanced networking diagnostics ---
-      - name: Network diagnostics (for debugging)
-        if: always()
-        run: |
-          echo "=== Network Diagnostics ==="
-          echo "Default gateway:"
-          ip route | grep default || true
-          echo "Docker bridge network:"
-          ip addr show docker0 2>/dev/null || echo "No docker0 interface"
-          echo "Testing API connectivity from host:"
-          curl -s http://127.0.0.1:4000/graphql -X POST || echo "Host API unreachable"
-          echo "Testing via host.docker.internal simulation:"
-          # This simulates what Docker containers try to reach
-          GATEWAY_IP=$(ip route | awk '/default/ {print $3; exit}')
-          curl -s http://${GATEWAY_IP}:4000/graphql -X POST || echo "Gateway API unreachable"
-
-      # --- PR comment (Infracost-style) ---
       - name: Comment with cost diff (Infracost-style)
         if: always()
         env:
@@ -196,9 +133,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          
-          old="$(cat base-total.txt 2>/dev/null || echo "0.00")"
-          new="$(cat pr-total.txt 2>/dev/null || echo "0.00")"
+          BASE_TXT="base-plancosts.txt"
+          PR_TXT="pr-plancosts.txt"
+
+          old="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$BASE_TXT" 2>/dev/null || echo "0.00")"
+          new="$(awk '/^OVERALL TOTAL/ {print $NF; exit}' "$PR_TXT"   2>/dev/null || echo "0.00")"
           f_old="$(awk -v n="$old" 'BEGIN{printf "%.2f", n+0}')"
           f_new="$(awk -v n="$new" 'BEGIN{printf "%.2f", n+0}')"
           diff_amt="$(awk -v o="$old" -v n="$new" 'BEGIN{printf "%.2f", (n+0)-(o+0)}')"
@@ -213,11 +152,8 @@ jobs:
           diff_cell="${sign}\$${diff_amt} ${pct_text}"
           headline="$(awk -v d="$diff_amt" 'BEGIN{ d+=0; if (d>0) print "increase"; else if (d<0) print "decrease"; else print "stay the same"; }')"
 
-          diff_content="$(cat diff.txt 2>/dev/null || echo "No differences detected")"
-          
-          echo "DEBUG: Calculated values:"
-          echo "  old=$old, new=$new, diff_amt=$diff_amt"
-          echo "  headline=$headline, diff_cell=$diff_cell"
+          diff_content="$(diff -u "$BASE_TXT" "$PR_TXT" | tail -n +3 || true)"
+          if [[ -z "$diff_content" ]]; then diff_content="No differences detected"; fi
 
           body="$(jq -n --arg headline "$headline" \
                        --arg f_old "$f_old" \
@@ -229,7 +165,7 @@ jobs:
             {
               body:
               ("💰 **Plancosts estimate:** monthly cost will " + $headline + " " +
-               "($" + ( ($diff_cell | capture("(?<sign>[+−-]?)(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
+               "($" + ( ($diff_cell | capture("(?<sign>[+-]?)(?<val>[0-9.]+)")).val ) + ") 📊\n\n" +
                "| Project | Previous | New | Diff |\n" +
                "|---|---:|---:|---:|\n" +
                "| " + $proj + " | $" + $f_old + " | $" + $f_new + " | " + $diff_cell + " |\n" +
@@ -241,14 +177,14 @@ jobs:
           curl -sS -L -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "X-GitHub-Api-Version": "2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d "$body"
 
       - name: Show mock log tail (if present)
         if: always()
         run: |
-          if [[ -f mock_server.log ]]; then
+          if [[ -f pr/mock_pid.txt ]]; then
             echo "--- mock_server.log (tail) ---"
             tail -n 200 mock_server.log || true
           fi
