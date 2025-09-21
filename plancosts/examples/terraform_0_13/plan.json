@@ -124,7 +124,7 @@
                   "iops": 0,
                   "multi_attach_enabled": null,
                   "outpost_arn": null,
-                  "size": 200,
+                  "size": 20,
                   "tags": null,
                   "type": "io1"
                 }
@@ -175,7 +175,7 @@
                   "iops": 0,
                   "multi_attach_enabled": null,
                   "outpost_arn": null,
-                  "size": 20,
+                  "size": 40,
                   "tags": null,
                   "type": "io1"
                 }
@@ -226,7 +226,7 @@
                   "iops": 0,
                   "multi_attach_enabled": null,
                   "outpost_arn": null,
-                  "size": 20,
+                  "size": 40,
                   "tags": null,
                   "type": "io1"
                 }
@@ -281,7 +281,7 @@
                   "root_block_device": [
                     {
                       "delete_on_termination": true,
-                      "volume_size": 10
+                      "volume_size": 100
                     }
                   ],
                   "source_dest_check": true,
