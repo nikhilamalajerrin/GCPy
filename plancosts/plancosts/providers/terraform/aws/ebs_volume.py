@@ -1,7 +1,3 @@
-"""
-Typed AWS EBS Volume resource & components (aws_terraform).
-"""
-
 from __future__ import annotations
 
 from decimal import Decimal
@@ -16,11 +12,6 @@ from .base import (
     _to_decimal,
 )
 
-# ----------------------------
-# Price components
-# ----------------------------
-
-
 class EbsVolumeGB(BaseAwsPriceComponent):
     def __init__(self, name: str, resource: "EbsVolume"):
         super().__init__(name=name, resource=resource, time_unit="month")
@@ -30,11 +21,14 @@ class EbsVolumeGB(BaseAwsPriceComponent):
             Filter(key="volumeApiName", value="gp2"),
         ]
         self.value_mappings = [ValueMapping(from_key="type", to_key="volumeApiName")]
+        # Display unit/quantity
+        self.unit_ = "GB/month"
+        self.SetQuantityMultiplierFunc(
+            lambda r: _to_decimal(r.RawValues().get("size"), Decimal(DEFAULT_VOLUME_SIZE))
+        )
 
     def hourly_cost(self) -> Decimal:
-        # base monthly → hourly conversion
         base_hourly = super().hourly_cost()
-        # multiply by GB size
         size = _to_decimal(
             self.resource().raw_values().get("size"), Decimal(DEFAULT_VOLUME_SIZE)
         )
@@ -47,12 +41,14 @@ class EbsVolumeIOPS(BaseAwsPriceComponent):
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="System Operation"),
-            Filter(
-                key="usagetype", value="/EBS:VolumeP-IOPS.piops/", operation="REGEX"
-            ),
+            Filter(key="usagetype", value="/EBS:VolumeP-IOPS.piops/", operation="REGEX"),
             Filter(key="volumeApiName", value="gp2"),
         ]
         self.value_mappings = [ValueMapping(from_key="type", to_key="volumeApiName")]
+        self.unit_ = "IOPS/month"
+        self.SetQuantityMultiplierFunc(
+            lambda r: _to_decimal(r.RawValues().get("iops"), Decimal(0))
+        )
 
     def hourly_cost(self) -> Decimal:
         base_hourly = super().hourly_cost()
@@ -60,18 +56,10 @@ class EbsVolumeIOPS(BaseAwsPriceComponent):
         return base_hourly * iops
 
 
-# ----------------------------
-# Resource
-# ----------------------------
-
-
 class EbsVolume(BaseAwsResource):
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
         super().__init__(address=address, region=region, raw_values=raw_values)
-
         pcs: List[BaseAwsPriceComponent] = [EbsVolumeGB("GB", self)]
-        # Only include IOPS for io1 (io2 would be different pricing; matching the Go commit behavior)
         if self.raw_values().get("type") == "io1":
             pcs.append(EbsVolumeIOPS("IOPS", self))
-
         self._set_price_components(pcs)
