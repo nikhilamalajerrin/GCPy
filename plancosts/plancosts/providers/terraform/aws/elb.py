@@ -4,46 +4,29 @@ from typing import Any, Dict, List
 
 from plancosts.base.filters import Filter, ValueMapping
 from plancosts.base.resource import PriceComponent, Resource
-from plancosts.providers.terraform.aws.base import (
-    BaseAwsPriceComponent,
-    BaseAwsResource,
-)
-
+from .base import BaseAwsPriceComponent, BaseAwsResource
 
 class ElbHours(BaseAwsPriceComponent):
     def __init__(self, resource: "Elb", is_classic: bool) -> None:
         super().__init__(name="Hours", resource=resource, time_unit="hour")
-        # Common filters
         self.default_filters = [
             Filter(key="servicecode", value="AWSELB"),
-            # productFamily depends on classic vs ALB/NLB
-            Filter(
-                key="productFamily",
-                value="Load Balancer" if is_classic else "Load Balancer-Application",
-            ),
-            # Usage type is a regex in the Go code
+            Filter(key="productFamily", value="Load Balancer" if is_classic else "Load Balancer-Application"),
             Filter(key="usagetype", value="/LoadBalancerUsage/", operation="REGEX"),
         ]
-
-        # For ALB/NLB we map load_balancer_type to productFamily
         if not is_classic:
             self.value_mappings = [
                 ValueMapping(
                     from_key="load_balancer_type",
                     to_key="productFamily",
-                    map_func=lambda v: (
-                        "Load Balancer-Network"
-                        if f"{v}" == "network"
-                        else "Load Balancer-Application"
-                    ),
+                    map_func=lambda v: "Load Balancer-Network" if f"{v}" == "network" else "Load Balancer-Application",
                 )
             ]
-
+        self.unit_ = "hour"
+        self.SetQuantityMultiplierFunc(lambda r: 1)
 
 class Elb(BaseAwsResource):
-    def __init__(
-        self, address: str, region: str, raw_values: Dict[str, Any], is_classic: bool
-    ) -> None:
+    def __init__(self, address: str, region: str, raw_values: Dict[str, Any], is_classic: bool) -> None:
         super().__init__(address, region, raw_values)
         self._price_components: List[PriceComponent] = [ElbHours(self, is_classic)]
         self._sub_resources: List[Resource] = []

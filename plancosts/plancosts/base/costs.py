@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Dict, List, Optional
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Any, Dict, List
 
-from plancosts.base.query import GraphQLQueryRunner
 from plancosts.base.resource import PriceComponent, Resource
 
 HOURS_IN_MONTH = Decimal(730)
@@ -30,32 +29,32 @@ class ResourceCostBreakdown:
     sub_resource_costs: List["ResourceCostBreakdown"]
 
 
-def _set_price_from_query(pc, result):
+def _create_price_component_cost(pc: PriceComponent, query_result: Any) -> PriceComponentCost:
+    """Compute hourly + monthly costs for a single price component."""
+    hourly = pc.hourly_cost()
+    monthly = _round6(hourly * HOURS_IN_MONTH)
+    return PriceComponentCost(price_component=pc, hourly_cost=hourly, monthly_cost=monthly)
+
+
+def _set_price_component_price(resource: Resource, pc: PriceComponent, query_result: Any) -> None:
+    """
+    Extract USD unit price from the GraphQL result and set it on the price component.
+    Logs like the Go code (includes resource address and component name).
+    """
     try:
-        products = (result or {}).get("data", {}).get("products", []) or []
-        addr = getattr(pc, "resource", None)
-        # Try to get address for logging
-        if callable(addr):
-            try:
-                res = pc.resource()
-                res_addr = getattr(res, "address", None)
-                if callable(res_addr):
-                    res_addr = res_addr()
-                elif res_addr is None:
-                    res_addr = getattr(res, "Address", lambda: "")()
-            except Exception:
-                res_addr = ""
-        else:
-            res_addr = ""
+        products = (query_result or {}).get("data", {}).get("products", []) or []
+        res_addr = resource.address()
+        pc_name = pc.name()
 
         if not products:
-            if res_addr:
-                logging.warning("No prices found for %s, using 0.00", res_addr)
+            logging.warning("No prices found for %s %s, using 0.00", res_addr, pc_name)
             price = Decimal("0")
         else:
-            if len(products) > 1 and res_addr:
+            if len(products) > 1:
                 logging.warning(
-                    "Multiple prices found for %s, using the first price", res_addr
+                    "Multiple prices found for %s %s, using the first price",
+                    res_addr,
+                    pc_name,
                 )
             p0 = products[0]
             price_str = (
@@ -67,89 +66,70 @@ def _set_price_from_query(pc, result):
             price = Decimal(str(price_str))
     except Exception:
         price = Decimal("0")
+
     pc.set_price(price)
 
 
-def _pc_cost(pc: PriceComponent) -> PriceComponentCost:
-    hourly = pc.hourly_cost()
-    monthly = _round6(hourly * HOURS_IN_MONTH)
-    return PriceComponentCost(pc, hourly, monthly)
+def _get_cost_breakdown(resource: Resource, results: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
+    """
+    Build the breakdown for a resource using the previously fetched results map.
+    Recurses into sub-resources.
+    """
+    pc_costs: List[PriceComponentCost] = []
+    for pc in resource.price_components():
+        result = results.get(resource, {}).get(pc)
+        # We still compute costs even if result is missing; pc.hourly_cost() should reflect last set price (or 0)
+        pc_costs.append(_create_price_component_cost(pc, result))
 
+    sub_costs: List[ResourceCostBreakdown] = []
+    for sub in resource.sub_resources():
+        sub_costs.append(_get_cost_breakdown(sub, results))
 
-def _breakdown_for(
-    resource: Resource, results_map: Dict[Resource, Dict[PriceComponent, Any]]
-) -> ResourceCostBreakdown:
-    # sort price components by name for stable diffs
-    pcs: List[PriceComponentCost] = []
-    for pc in sorted(resource.price_components(), key=lambda p: p.name()):
-        if pc in results_map.get(resource, {}):
-            hourly = pc.hourly_cost()
-            monthly = _round6(hourly * HOURS_IN_MONTH)
-            pcs.append(PriceComponentCost(pc, hourly, monthly))
-
-    # sort sub-resources by address for stable diffs
-    subs: List[ResourceCostBreakdown] = []
-    for sub in sorted(resource.sub_resources(), key=lambda r: r.address()):
-        if results_map.get(sub):
-            subs.append(_breakdown_for(sub, results_map))
-
-    return ResourceCostBreakdown(resource, pcs, subs)
-
-
-# ---- Compatibility shim expected by tests -------------------------------------
-# Tests monkeypatch costs_mod.run_queries, so keep this symbol at module scope.
-def run_queries(resource: Resource) -> Dict[Resource, Dict[PriceComponent, Any]]:
-    """Default runner-based implementation; test can monkeypatch this."""
-    return GraphQLQueryRunner().run_queries(resource)
-
-
-# ---- Flexible API: supports both (resources) and (runner, resources) ----------
+    return ResourceCostBreakdown(
+        resource=resource,
+        price_component_costs=pc_costs,
+        sub_resource_costs=sub_costs,
+    )
 
 
 def generate_cost_breakdowns(
-    runner_or_resources,  # GraphQLQueryRunner | List[Resource]
-    maybe_resources: Optional[List[Resource]] = None,
+    runner,  # must provide .run_queries(resource) -> Dict[Resource, Dict[PriceComponent, Any]]
+    resources: List[Resource],
 ) -> List[ResourceCostBreakdown]:
     """
-    Supports:
-      - generate_cost_breakdowns(resources)
-      - generate_cost_breakdowns(runner, resources)
-    The first form uses the module-level run_queries() so tests can monkeypatch it.
+    Commit-parity flow:
+      1) For each resource, batch GraphQL queries (done by runner), collect results.
+      2) For each (resource, priceComponent) result, set the unit price on the PC.
+      3) Build recursive cost breakdown trees.
+      4) Skip resources with has_cost() == False when producing the final list.
     """
-    # Determine call style
-    if maybe_resources is None:
-        resources: List[Resource] = runner_or_resources  # type: ignore[assignment]
-        # Use shim so monkeypatch works
-        all_results: Dict[Resource, Dict[PriceComponent, Any]] = {}
-        for r in resources:
-            rmap = run_queries(r)
-            for rr, pcs in rmap.items():
-                for pc, result in pcs.items():
-                    _set_price_from_query(pc, result)
-            all_results.update(rmap)
-    else:
-        runner: GraphQLQueryRunner = runner_or_resources  # type: ignore[assignment]
-        resources = maybe_resources
-        all_results = {}
-        for r in resources:
-            rmap = runner.run_queries(r)
-            for rr, pcs in rmap.items():
-                for pc, result in pcs.items():
-                    _set_price_from_query(pc, result)
-            all_results.update(rmap)
+    cost_breakdowns: List[ResourceCostBreakdown] = []
 
-    # Build breakdowns
-    out: List[ResourceCostBreakdown] = []
-    for r in sorted(resources, key=lambda rs: rs.address()):
+    # Gather results for all resources and set prices
+    results_by_resource: Dict[Resource, Dict[PriceComponent, Any]] = {}
+    for r in resources:
+        resource_results = runner.run_queries(r)
+        results_by_resource.update(resource_results)
+
+        # Set unit price on each price component using the query result
+        for rr, pc_map in resource_results.items():
+            for pc, result in pc_map.items():
+                _set_price_component_price(rr, pc, result)
+
+    # Build breakdowns (respect has_cost here)
+    for r in resources:
         if not r.has_cost():
             continue
-        out.append(_breakdown_for(r, all_results))
-    return out
+        cost_breakdowns.append(_get_cost_breakdown(r, results_by_resource))
+
+    # Sort for stable output (match Go’s stable presentation)
+    cost_breakdowns.sort(key=lambda b: b.resource.address())
+    return cost_breakdowns
 
 
-# Backward-compatible alias used by main.py
+# Back-compat alias used by some callers
 def get_cost_breakdowns(
-    runner_or_resources,
-    maybe_resources: Optional[List[Resource]] = None,
+    runner,
+    resources: List[Resource],
 ) -> List[ResourceCostBreakdown]:
-    return generate_cost_breakdowns(runner_or_resources, maybe_resources)
+    return generate_cost_breakdowns(runner, resources)

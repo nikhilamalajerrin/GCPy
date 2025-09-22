@@ -1,24 +1,34 @@
-# plancosts/providers/aws_terraform/base.py
+# plancosts/providers/terraform/aws/base.py
 """
-AWS Terraform typed resource/pricecomponent base classes (Python port).
+AWS Terraform typed resource/pricecomponent base classes (strict Go-port).
 
-Mirrors the Go commit that introduced:
-- AwsResource / AwsPriceComponent interfaces
-- BaseAwsResource / BaseAwsPriceComponent implementations
+Matches the Go commit:
+- DefaultVolumeSize
+- regionMapping → used to seed region filters (locationType/location)
+- BaseAwsPriceComponent: AwsResource(), TimeUnit(), Name(), Resource(), Filters(),
+  SetPrice(), HourlyCost()
+- BaseAwsResource: Address(), Region(), RawValues(), SubResources() (sorted),
+  PriceComponents() (sorted), References(), AddReference(), HasCost()
+
+Also includes a Python-only helper `_to_decimal` used by resource files to safely
+coerce JSON-ish values to Decimal (mirrors Go's inline decimal conversions).
+
+Extended to include Unit()/Quantity()/SetQuantityMultiplierFunc so the table can
+render QUANTITY and UNIT like the Go CLI.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
-from plancosts.base.filters import Filter, ValueMapping, merge_filters
+from plancosts.base.filters import Filter, ValueMapping, merge_filters, map_filters
 
 # ----------------------------
 # Constants & region mapping
 # ----------------------------
 
-DEFAULT_VOLUME_SIZE = 8  # GiB
+DEFAULT_VOLUME_SIZE = 8  # Go: var DefaultVolumeSize = 8
 
 REGION_MAPPING: Dict[str, str] = {
     "us-gov-west-1": "AWS GovCloud (US)",
@@ -48,12 +58,11 @@ REGION_MAPPING: Dict[str, str] = {
 }
 
 # ----------------------------
-# Internal helpers
+# Small helpers (Python-only)
 # ----------------------------
 
-
 def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
-    """Safely coerce any JSON-ish value to Decimal."""
+    """Safely coerce any JSON-ish value to Decimal (Go does this inline)."""
     if isinstance(val, Decimal):
         return val
     if val is None:
@@ -64,84 +73,89 @@ def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
         return default
 
 
-def _value_mapped_filters(
-    value_mappings: List[ValueMapping], values: Dict[str, Any]
-) -> List[Filter]:
-    """Map raw values to pricing filters using ValueMapping rules."""
-    out: List[Filter] = []
-    for vm in value_mappings:
-        if vm.from_key in values:
-            to_val = vm.mapped_value(values[vm.from_key])
-            if to_val:
-                out.append(Filter(key=vm.to_key, value=to_val))
-    return out
-
+def region_filters(region: str) -> List[Filter]:
+    """Go's regionFilters(region) helper."""
+    return [
+        Filter(key="locationType", value="AWS Region"),
+        Filter(key="location", value=REGION_MAPPING.get(region, "")),
+    ]
 
 # ----------------------------
 # Base AWS Price Component
 # ----------------------------
 
-
 class BaseAwsPriceComponent:
     def __init__(self, name: str, resource: "BaseAwsResource", time_unit: str):
-        self._name = name
-        self._resource = resource
-        self._time_unit = time_unit  # "hour" | "month"
-        self._default_filters: List[Filter] = []
-        self._value_mappings: List[ValueMapping] = []
-        self._price: Decimal = Decimal(0)
+        self.name_: str = name
+        self.resource_: BaseAwsResource = resource
+        self.time_unit_: str = time_unit  # "hour" | "month"
 
-        location = REGION_MAPPING.get(resource.region(), "")
-        self._region_filters: List[Filter] = [
+        # Go: regionFilters seeded from regionMapping
+        self.region_filters: List[Filter] = [
             Filter(key="locationType", value="AWS Region"),
-            Filter(key="location", value=location),
+            Filter(key="location", value=REGION_MAPPING.get(resource.Region(), "")),
         ]
+        self.default_filters: List[Filter] = []
+        self.value_mappings: List[ValueMapping] = []
+        self.price_: Decimal = Decimal(0)
 
-    # --- Go-parity style accessors ---
+        # NEW: display unit + quantity fn for table (Go has SetQuantityMultiplierFunc)
+        self.unit_: str = time_unit
+        self._quantity_fn: Callable[["BaseAwsResource"], Decimal] = lambda r: Decimal(1)
+
+    # ---- Go-parity methods ----
     def AwsResource(self) -> "BaseAwsResource":
-        return self._resource
+        return self.resource_
 
     def TimeUnit(self) -> str:
-        return self._time_unit
+        return self.time_unit_
 
     def Name(self) -> str:
-        return self._name
-
-    # Back-compat names used by other parts of the codebase
-    def get_filters(self):
-        return self.Filters()
-
-    def calculate_hourly_cost(self, price: Decimal) -> Decimal:
-        self.SetPrice(price)
-        return self.HourlyCost()
+        return self.name_
 
     def Resource(self) -> "BaseAwsResource":
-        return self._resource
+        return self.resource_
 
     def Filters(self) -> List[Filter]:
-        mapped = _value_mapped_filters(
-            self._value_mappings, self._resource.raw_values()
-        )
-        return merge_filters(self._region_filters, self._default_filters, mapped)
+        # Go: base.MapFilters(valueMappings, resource.RawValues())
+        mapped = map_filters(self.value_mappings, self.resource_.RawValues())
+        # Go: base.MergeFilters(regionFilters, defaultFilters, filters)
+        return merge_filters(self.region_filters, self.default_filters, mapped)
 
     def SetPrice(self, price: Decimal) -> None:
-        self._price = price
+        self.price_ = Decimal(price)
 
     def HourlyCost(self) -> Decimal:
-        secs = {"hour": Decimal(3600), "month": Decimal(3600 * 730)}
-        denom = secs.get(self._time_unit) or Decimal(3600)
+        # Go logic: timeUnitSecs["hour"]/timeUnitSecs[self.time_unit_] * price
+        time_unit_secs = {
+            "hour": Decimal(60 * 60),
+            "month": Decimal(60 * 60 * 730),
+        }
+        denom = time_unit_secs.get(self.time_unit_, time_unit_secs["hour"])
         try:
-            return self._price * (secs["hour"] / denom)
+            multiplier = time_unit_secs["hour"] / denom
         except (InvalidOperation, ZeroDivisionError):
-            return self._price
+            multiplier = Decimal(1)
+        return self.price_ * multiplier
 
-    # --- Python-friendly aliases/back-compat (no skip_query anymore) ---
-    def aws_resource(self) -> "BaseAwsResource":
-        return self.AwsResource()
+    # NEW: Provide unit/quantity like Go now expects
+    def Unit(self) -> str:
+        return self.unit_
 
-    def time_unit(self) -> str:
-        return self.TimeUnit()
+    def Quantity(self) -> Decimal:
+        try:
+            return self._quantity_fn(self.resource_)
+        except Exception:
+            return Decimal(0)
 
+    def SetQuantityMultiplierFunc(self, fn: Callable[["BaseAwsResource"], Decimal]) -> None:
+        self._quantity_fn = fn
+
+    # --- compatibility alias used by wrappers (e.g., ASG) ---
+    def get_filters(self) -> List[Filter]:
+        return self.Filters()
+
+    # ---- Python-friendly aliases (optional) ----
     def name(self) -> str:
         return self.Name()
 
@@ -157,71 +171,53 @@ class BaseAwsPriceComponent:
     def hourly_cost(self) -> Decimal:
         return self.HourlyCost()
 
-    # --- Mutables for subclasses ---
-    @property
-    def default_filters(self) -> List[Filter]:
-        return self._default_filters
+    def unit(self) -> str:
+        return self.Unit()
 
-    @default_filters.setter
-    def default_filters(self, v: List[Filter]) -> None:
-        self._default_filters = v
-
-    @property
-    def value_mappings(self) -> List[ValueMapping]:
-        return self._value_mappings
-
-    @value_mappings.setter
-    def value_mappings(self, v: List[ValueMapping]) -> None:
-        self._value_mappings = v
-
+    def quantity(self) -> Decimal:
+        return self.Quantity()
 
 # ----------------------------
 # Base AWS Resource
 # ----------------------------
 
-
 class BaseAwsResource:
-    """
-    Minimal resource base used by typed AWS resources.
-    Manages address, region, raw values, references, subresources, and components.
-    """
-
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
-        self._address = address
-        self._region = region
-        self._raw_values = raw_values or {}
-        self._references: Dict[str, "BaseAwsResource"] = {}
-        self._sub_resources: List["BaseAwsResource"] = []
-        self._price_components: List[BaseAwsPriceComponent] = []
+        self.address_: str = address
+        self.region_: str = region
+        self.raw_values_: Dict[str, Any] = raw_values or {}
+        self.references_: Dict[str, "BaseAwsResource"] = {}
+        self.sub_resources_: List["BaseAwsResource"] = []
+        self.price_components_: List[BaseAwsPriceComponent] = []
 
-    # --- Required interface methods (Go parity) ---
-
+    # ---- Go-parity methods ----
     def Address(self) -> str:
-        return self._address
+        return self.address_
 
     def Region(self) -> str:
-        return self._region
+        return self.region_
 
     def RawValues(self) -> Dict[str, Any]:
-        return self._raw_values
+        return self.raw_values_
 
     def SubResources(self) -> List["BaseAwsResource"]:
-        return self._sub_resources
+        # Go sorts by Address()
+        return sorted(self.sub_resources_, key=lambda r: r.Address())
 
     def PriceComponents(self) -> List[BaseAwsPriceComponent]:
-        return self._price_components
+        # Go sorts by Name()
+        return sorted(self.price_components_, key=lambda pc: pc.Name())
 
     def References(self) -> Dict[str, "BaseAwsResource"]:
-        return self._references
+        return self.references_
 
     def AddReference(self, name: str, resource: "BaseAwsResource") -> None:
-        self._references[name] = resource
+        self.references_[name] = resource
 
     def HasCost(self) -> bool:
         return True
 
-    # --- Python-friendly aliases/back-compat ---
-
+    # ---- Python-friendly aliases ----
     def address(self) -> str:
         return self.Address()
 
@@ -246,10 +242,9 @@ class BaseAwsResource:
     def has_cost(self) -> bool:
         return self.HasCost()
 
-    # --- Helpers for subclasses to populate internals ---
-
+    # ---- Helpers for subclasses to populate internals ----
     def _set_sub_resources(self, subs: List["BaseAwsResource"]) -> None:
-        self._sub_resources = subs
+        self.sub_resources_ = subs
 
     def _set_price_components(self, pcs: List[BaseAwsPriceComponent]) -> None:
-        self._price_components = pcs
+        self.price_components_ = pcs

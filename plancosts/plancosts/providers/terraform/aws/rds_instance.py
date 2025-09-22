@@ -28,7 +28,18 @@ class RdsStorageIOPS(PriceComponent):
         ]
         self._inner.value_mappings = [_MULTI_AZ]
 
-    # delegate required API
+    # -------- Go-compat (needed by BaseAwsResource.PriceComponents sorter) -----
+    def Name(self) -> str:
+        return self._inner.Name()
+
+    def Resource(self) -> BaseAwsResource:
+        return self._inner.Resource()
+
+    def Filters(self):
+        return self._inner.Filters()
+    # --------------------------------------------------------------------------
+
+    # existing Python API
     def name(self):
         return self._inner.Name()
 
@@ -67,6 +78,17 @@ class RdsStorageGB(PriceComponent):
             ),
             _MULTI_AZ,
         ]
+
+    # -------- Go-compat (needed by BaseAwsResource.PriceComponents sorter) -----
+    def Name(self) -> str:
+        return self._inner.Name()
+
+    def Resource(self) -> BaseAwsResource:
+        return self._inner.Resource()
+
+    def Filters(self):
+        return self._inner.Filters()
+    # --------------------------------------------------------------------------
 
     def name(self):
         return self._inner.Name()
@@ -133,6 +155,17 @@ class RdsInstanceHours(PriceComponent):
             ),
             _MULTI_AZ,
         ]
+
+    # -------- Go-compat (needed by BaseAwsResource.PriceComponents sorter) -----
+    def Name(self) -> str:
+        return self._inner.Name()
+
+    def Resource(self) -> BaseAwsResource:
+        return self._inner.Resource()
+
+    def Filters(self):
+        return self._inner.Filters()
+    # --------------------------------------------------------------------------
 
     def name(self):
         return self._inner.Name()

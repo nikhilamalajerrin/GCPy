@@ -1,14 +1,10 @@
-"""
-Resource & PriceComponent abstractions (refactored model).
-"""
-
+# plancosts/base/resource.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-# Let mypy see Filter, but avoid runtime import cycles
 if TYPE_CHECKING:
     from plancosts.base.filters import Filter
 
@@ -29,23 +25,26 @@ class PriceComponent(ABC):
 class Resource(ABC):
     @abstractmethod
     def address(self) -> str: ...
-    @abstractmethod
-    def raw_values(self) -> Dict[str, Any]: ...
-    @abstractmethod
-    def references(self) -> Dict[str, "Resource"]: ...
-    @abstractmethod
-    def add_reference(self, name: str, resource: "Resource") -> None: ...
+    # (raw_values is fine to keep even though it’s not in this commit’s Go interface)
+    def raw_values(self) -> Dict[str, Any]:  # optional method you already use elsewhere
+        return {}
     @abstractmethod
     def sub_resources(self) -> List["Resource"]: ...
     @abstractmethod
     def price_components(self) -> List[PriceComponent]: ...
     @abstractmethod
+    def references(self) -> Dict[str, "Resource"]: ...
+    @abstractmethod
+    def add_reference(self, name: str, resource: "Resource") -> None: ...
+    @abstractmethod
     def has_cost(self) -> bool: ...
 
 
-# Utility (used by snapshots)
-def get_price_component(resource: Resource, name: str) -> PriceComponent | None:
+def get_price_component(resource: Resource, name: str) -> Optional[PriceComponent]:
     for pc in resource.price_components():
         if pc.name() == name:
             return pc
     return None
+
+# Back-compat alias to match the Go helper’s name in case anything calls it directly
+GetPriceComponent = get_price_component
