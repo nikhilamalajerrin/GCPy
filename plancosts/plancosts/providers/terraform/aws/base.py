@@ -22,7 +22,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List
 
-from plancosts.base.filters import Filter, ValueMapping, merge_filters, map_filters
+from plancosts.resource.filters import Filter, ValueMapping, merge_filters, map_filters
 
 # ----------------------------
 # Constants & region mapping

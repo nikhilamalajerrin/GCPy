@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from plancosts.base.filters import Filter
+from plancosts.resource.filters import Filter
 
 from .base import (
     DEFAULT_VOLUME_SIZE,

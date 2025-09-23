@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from plancosts.base.filters import Filter, ValueMapping
-from plancosts.base.resource import PriceComponent, Resource
+from plancosts.resource.filters import Filter, ValueMapping
+from plancosts.resource.resource import PriceComponent, Resource
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
 class ElbHours(BaseAwsPriceComponent):

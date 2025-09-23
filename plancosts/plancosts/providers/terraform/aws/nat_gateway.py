@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from plancosts.base.filters import Filter
+from plancosts.resource.filters import Filter
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
 class NatGatewayHours(BaseAwsPriceComponent):

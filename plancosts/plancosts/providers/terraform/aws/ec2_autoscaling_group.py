@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from plancosts.base.filters import Filter  # type hints
+from plancosts.resource.filters  import Filter  # type hints
 
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
