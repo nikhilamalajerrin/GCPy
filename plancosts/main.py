@@ -31,7 +31,7 @@ except Exception:
     pass
 
 from plancosts.base.costs import get_cost_breakdowns
-from plancosts.base.query import GraphQLQueryRunner
+from plancosts.costs.query import GraphQLQueryRunner
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.output.json import to_json
 from plancosts.output.table import to_table

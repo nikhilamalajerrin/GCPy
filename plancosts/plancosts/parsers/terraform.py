@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from plancosts.base.resource import Resource  # your existing base interfaces
+from plancosts.resource.resource import Resource # your existing base interfaces
 
 # Typed AWS resources (match your earlier Python files under providers/terraform/aws)
 from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance

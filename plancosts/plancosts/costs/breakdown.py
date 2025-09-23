@@ -1,4 +1,4 @@
-# plancosts/base/costs.py
+# plancosts/costs/breakdown.py
 from __future__ import annotations
 
 import logging
@@ -30,17 +30,12 @@ class ResourceCostBreakdown:
 
 
 def _create_price_component_cost(pc: PriceComponent, query_result: Any) -> PriceComponentCost:
-    """Compute hourly + monthly costs for a single price component."""
     hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(price_component=pc, hourly_cost=hourly, monthly_cost=monthly)
 
 
 def _set_price_component_price(resource: Resource, pc: PriceComponent, query_result: Any) -> None:
-    """
-    Extract USD unit price from the GraphQL result and set it on the price component.
-    Logs like the Go code (includes resource address and component name).
-    """
     try:
         products = (query_result or {}).get("data", {}).get("products", []) or []
         res_addr = resource.address()
@@ -59,9 +54,9 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
             p0 = products[0]
             price_str = (
                 p0.get("onDemandPricing", [{}])[0]
-                .get("priceDimensions", [{}])[0]
-                .get("pricePerUnit", {})
-                .get("USD", "0")
+                  .get("priceDimensions", [{}])[0]
+                  .get("pricePerUnit", {})
+                  .get("USD", "0")
             )
             price = Decimal(str(price_str))
     except Exception:
@@ -71,14 +66,9 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
 
 
 def _get_cost_breakdown(resource: Resource, results: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
-    """
-    Build the breakdown for a resource using the previously fetched results map.
-    Recurses into sub-resources.
-    """
     pc_costs: List[PriceComponentCost] = []
     for pc in resource.price_components():
         result = results.get(resource, {}).get(pc)
-        # We still compute costs even if result is missing; pc.hourly_cost() should reflect last set price (or 0)
         pc_costs.append(_create_price_component_cost(pc, result))
 
     sub_costs: List[ResourceCostBreakdown] = []
@@ -97,39 +87,44 @@ def generate_cost_breakdowns(
     resources: List[Resource],
 ) -> List[ResourceCostBreakdown]:
     """
-    Commit-parity flow:
-      1) For each resource, batch GraphQL queries (done by runner), collect results.
-      2) For each (resource, priceComponent) result, set the unit price on the PC.
-      3) Build recursive cost breakdown trees.
-      4) Skip resources with has_cost() == False when producing the final list.
+    Go-parity pipeline:
+      1) Skip non-costable resources before querying.
+      2) For each costable resource, batch GraphQL queries and collect results.
+      3) Set the unit price on each price component using its query result.
+      4) Build recursive cost breakdown trees; sort by resource address.
     """
     cost_breakdowns: List[ResourceCostBreakdown] = []
 
-    # Gather results for all resources and set prices
+    # 1) Query only resources that have cost (Go: if !resource.HasCost() continue)
     results_by_resource: Dict[Resource, Dict[PriceComponent, Any]] = {}
-    for r in resources:
-        resource_results = runner.run_queries(r)
-        results_by_resource.update(resource_results)
+    per_resource_results: Dict[Resource, Dict[Resource, Dict[PriceComponent, Any]]] = {}
 
-        # Set unit price on each price component using the query result
-        for rr, pc_map in resource_results.items():
+    for r in resources:
+        if not r.has_cost():
+            continue
+        # Runner returns {resource_or_subresource: {pc: result}}
+        res_map = runner.run_queries(r)
+        per_resource_results[r] = res_map
+        # Also aggregate into a single map so lookups during breakdown are O(1)
+        for rr, pc_map in res_map.items():
+            results_by_resource.setdefault(rr, {}).update(pc_map)
+
+        # 2) Set unit price for each (pc, result) in this resource's map
+        for rr, pc_map in res_map.items():
             for pc, result in pc_map.items():
                 _set_price_component_price(rr, pc, result)
 
-    # Build breakdowns (respect has_cost here)
+    # 3) Build breakdowns (skip non-costable like Go)
     for r in resources:
         if not r.has_cost():
             continue
         cost_breakdowns.append(_get_cost_breakdown(r, results_by_resource))
 
-    # Sort for stable output (match Go’s stable presentation)
+    # 4) Stable sort by address (Go sorts in output)
     cost_breakdowns.sort(key=lambda b: b.resource.address())
     return cost_breakdowns
 
 
-# Back-compat alias used by some callers
-def get_cost_breakdowns(
-    runner,
-    resources: List[Resource],
-) -> List[ResourceCostBreakdown]:
+# Back-compat alias
+def get_cost_breakdowns(runner, resources: List[Resource]) -> List[ResourceCostBreakdown]:
     return generate_cost_breakdowns(runner, resources)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from plancosts.base.filters import Filter, ValueMapping
+from plancosts.resource.filters import Filter, ValueMapping
 from .base import BaseAwsPriceComponent, BaseAwsResource
 from .ec2_instance import Ec2BlockDevice
 

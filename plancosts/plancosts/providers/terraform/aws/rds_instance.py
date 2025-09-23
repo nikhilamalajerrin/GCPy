@@ -3,8 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Dict, List
 
-from plancosts.base.filters import Filter, ValueMapping
-from plancosts.base.resource import PriceComponent, Resource
+from plancosts.resource.filters import Filter, ValueMapping
+from plancosts.resource.resource import PriceComponent, Resource
 from plancosts.providers.terraform.aws.base import (
     BaseAwsPriceComponent,
     BaseAwsResource,
