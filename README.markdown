@@ -24,6 +24,8 @@ Lightweight Python-based cost estimation for Terraform plans. This tool provides
   - PR Cost Diff: Comments cost differences on pull requests.
 - **Sample Terraform Projects**: Examples under `examples/` for testing.
 
+![image](https://i.imgur.com/MO3dUsB.png)
+
 ## Quick Start
 Clone and set up the project:
 
