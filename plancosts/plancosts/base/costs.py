@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from typing import Any, Dict, List
 
 from plancosts.resource.resource import PriceComponent, Resource
@@ -29,11 +29,46 @@ class ResourceCostBreakdown:
     sub_resource_costs: List["ResourceCostBreakdown"]
 
 
-def _create_price_component_cost(pc: PriceComponent, query_result: Any) -> PriceComponentCost:
+def _create_price_component_cost(pc: PriceComponent, _query_result: Any) -> PriceComponentCost:
     """Compute hourly + monthly costs for a single price component."""
     hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(price_component=pc, hourly_cost=hourly, monthly_cost=monthly)
+
+
+def _extract_price_usd_from_result(query_result: Any) -> Decimal:
+    """
+    Preferred (new schema):
+      data.products[].prices[].USD
+    Fallback (legacy aws-prices-graphql):
+      data.products[].onDemandPricing[].priceDimensions[].pricePerUnit.USD
+    """
+    try:
+        products = (query_result or {}).get("data", {}).get("products", []) or []
+        if not products:
+            return Decimal("0")
+
+        p0 = products[0]
+
+        prices = p0.get("prices")
+        if isinstance(prices, list) and prices:
+            usd = prices[0].get("USD")
+            if usd is not None:
+                return Decimal(str(usd))
+
+        odp = p0.get("onDemandPricing")
+        if isinstance(odp, list) and odp:
+            dims = odp[0].get("priceDimensions") or []
+            if dims:
+                usd = (dims[0].get("pricePerUnit") or {}).get("USD")
+                if usd is not None:
+                    return Decimal(str(usd))
+    except InvalidOperation:
+        logging.debug("Price string could not be parsed; treating as 0. (%s)", query_result)
+    except Exception:
+        pass
+
+    return Decimal("0")
 
 
 def _set_price_component_price(resource: Resource, pc: PriceComponent, query_result: Any) -> None:
@@ -41,11 +76,10 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
     Extract USD unit price from the GraphQL result and set it on the price component.
     Logs like the Go code (includes resource address and component name).
     """
+    res_addr = resource.address()
+    pc_name = pc.name()
     try:
         products = (query_result or {}).get("data", {}).get("products", []) or []
-        res_addr = resource.address()
-        pc_name = pc.name()
-
         if not products:
             logging.warning("No prices found for %s %s, using 0.00", res_addr, pc_name)
             price = Decimal("0")
@@ -56,14 +90,7 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
                     res_addr,
                     pc_name,
                 )
-            p0 = products[0]
-            price_str = (
-                p0.get("onDemandPricing", [{}])[0]
-                .get("priceDimensions", [{}])[0]
-                .get("pricePerUnit", {})
-                .get("USD", "0")
-            )
-            price = Decimal(str(price_str))
+            price = _extract_price_usd_from_result(query_result)
     except Exception:
         price = Decimal("0")
 
@@ -78,7 +105,6 @@ def _get_cost_breakdown(resource: Resource, results: Dict[Resource, Dict[PriceCo
     pc_costs: List[PriceComponentCost] = []
     for pc in resource.price_components():
         result = results.get(resource, {}).get(pc)
-        # We still compute costs even if result is missing; pc.hourly_cost() should reflect last set price (or 0)
         pc_costs.append(_create_price_component_cost(pc, result))
 
     sub_costs: List[ResourceCostBreakdown] = []

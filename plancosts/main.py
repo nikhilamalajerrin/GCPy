@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Main entry point for plancosts - Generate cost reports from Terraform plans.
+plancosts - Generate cost reports from Terraform plans (Go v4.1 main.go port)
 
-Renamed flag: --tfplan-json -> --tfjson (keeps --tfplan-json as an alias).
-
-Matches the Go CLI UX:
-- Supports --tfjson OR (--tfplan with --tfdir) OR just --tfdir
-- Prints validation errors in bright red
-- Uses a GraphQL QueryRunner, endpoint from --api-url or env (PLANCOSTS_API_URL)
-- Defaults to table output; supports --output json
-- NEW: --no-color (turn off colored output; our renderer is ASCII-only so this
-       simply guarantees no ANSI escapes appear if future formatting is added)
+Flags (parity with Go):
+  --tfjson PATH      Path to Terraform Plan JSON
+  --tfplan PATH      Path to Terraform Plan file (requires --tfdir)
+  --tfdir DIR        Path to Terraform project directory
+  -v/--verbose       Verbose logging
+  -o/--output        Output format: table|json  (default: table)
+  --no-color         Disable colored output
+  --api-url URL      Price List API base URL (overrides env)
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ import sys
 
 import click
 
-# Optional: load .env / .env.local
+# Optional .env support (parity with Go .env/.env.local loading)
 try:
     from dotenv import load_dotenv  # pip install python-dotenv
 
@@ -52,10 +51,10 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option(
     "--tfjson",
-    "--tfplan-json",  # deprecated alias kept for back-compat
+    "--tfplan-json",  # historical alias
     "tfjson",
     type=click.Path(exists=False, dir_okay=False, readable=True),
-    help="Path to Terraform plan JSON file (from `terraform show -json`). (alias: --tfplan-json)",
+    help="Path to Terraform plan JSON (output of `terraform show -json`).",
 )
 @click.option(
     "--tfplan",
@@ -70,7 +69,7 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 @click.option(
     "--api-url",
     type=str,
-    help="Price List API base URL (e.g., http://localhost:4000). Overrides PLANCOSTS_API_URL.",
+    help="Price List API base URL (e.g., http://localhost:4000). Overrides env.",
 )
 @click.option(
     "--output",
@@ -108,59 +107,55 @@ def main(
 
     ctx = click.get_current_context()
 
-    # Validation (match Go messages)
+    # --- Validation (match Go UX/messages) ---
     if tfjson and tfplan:
         _fail(
             "Please only provide one of either a Terraform Plan JSON file (tfjson) or a Terraform Plan file (tfplan)",
             ctx,
         )
-
     if tfplan and not tfdir:
         _fail(
             "Please provide a path to the Terrafrom project (tfdir) if providing a Terraform Plan file (tfplan)\n",
             ctx,
         )
-
     if not tfjson and not tfdir:
         _fail(
             "Please provide either the path to the Terrafrom project (tfdir) or a Terraform Plan JSON file (tfjson).",
             ctx,
         )
 
-    # Existence checks
+    # --- Existence checks ---
     if tfjson and not os.path.isfile(tfjson):
         _fail(f"File not found: --tfjson '{tfjson}'")
-
     if tfplan and not os.path.isfile(tfplan):
         _fail(f"File not found: --tfplan '{tfplan}'")
-
     if tfdir and not os.path.isdir(tfdir):
         _fail(f"Directory not found: --tfdir '{tfdir}'")
 
     try:
-        # Get plan JSON
+        # --- Load/Generate plan JSON ---
         if tfjson:
             plan_json = load_plan_json(tfjson)
         else:
-            # Either: (tfdir only) OR (tfplan + tfdir)
             plan_json = generate_plan_json(tfdir, tfplan)
 
-        # Parse resources
+        # --- Parse resources ---
         resources = parse_plan_json(plan_json)
         if not resources:
             click.echo("No supported resources found in plan.", err=True)
             sys.exit(0)
 
-        # Build endpoint: --api-url overrides; ensure /graphql suffix
+        # --- Build GraphQL endpoint ---
+        # If api_url provided, append /graphql if missing; else use default constant
         endpoint = (
             f"{api_url.rstrip('/')}/graphql" if api_url else PRICE_LIST_API_ENDPOINT
         )
         runner = GraphQLQueryRunner(endpoint)
 
-        # Compute cost breakdowns
+        # --- Compute cost breakdowns ---
         breakdowns = get_cost_breakdowns(runner, resources)
 
-        # Render
+        # --- Render output ---
         if output.lower() == "json":
             click.echo(to_json(breakdowns))
         else:

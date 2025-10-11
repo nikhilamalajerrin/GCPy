@@ -1,3 +1,4 @@
+# plancosts/config.py
 from __future__ import annotations
 
 import os
@@ -8,13 +9,10 @@ from dataclasses import dataclass
 def _rstrip_slash(url: str) -> str:
     return (url or "").rstrip("/")
 
-def _to_graphql_endpoint(url: str) -> str:
+def _ensure_graphql_suffix(url: str) -> str:
     url = _rstrip_slash(url)
     return url if url.endswith("/graphql") else f"{url}/graphql"
 
-
-# Default base URL expected by tests
-_DEFAULT_API = "http://localhost:4000"
 
 @dataclass(frozen=True)
 class Config:
@@ -27,21 +25,23 @@ def resolve_endpoint(override: str | None = None) -> str:
     """
     Build a fully-qualified GraphQL endpoint each time it's called.
 
-    Precedence:
-      1) explicit override (e.g., --api-url)
-      2) legacy env PLAN_COSTS_PRICE_LIST_API_ENDPOINT
-      3) primary env PLANCOSTS_API_URL
-      4) default http://localhost:4000/
+    Precedence (mirrors Go's INFRACOST_API_URL while remaining back-compatible):
+      1) explicit override (e.g. from --api-url)
+      2) INFRACOST_API_URL (Go name)
+      3) PLANCOSTS_API_URL   (Python name used earlier)
+      4) PLAN_COSTS_PRICE_LIST_API_ENDPOINT (legacy)
+      5) default https://pricing.infracost.io
     """
     if override:
         base = override
     else:
-        legacy = os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT", "").strip()
-        if legacy:
-            base = legacy
-        else:
-            base = os.getenv("PLANCOSTS_API_URL", _DEFAULT_API)
-    return _to_graphql_endpoint(base)
+        base = (
+            os.getenv("INFRACOST_API_URL")
+            or os.getenv("PLANCOSTS_API_URL")
+            or os.getenv("PLAN_COSTS_PRICE_LIST_API_ENDPOINT")
+            or "https://pricing.infracost.io"
+        )
+    return _ensure_graphql_suffix(base)
 
 
 def load_config(api_url: str | None = None, no_color: bool = False) -> Config:

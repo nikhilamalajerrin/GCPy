@@ -1,4 +1,3 @@
-# mock_pricing_api.py
 import json
 import os
 import re
@@ -39,17 +38,18 @@ OVERRIDE = {
 
 
 def _usd(price: float) -> dict:
+    # Normalize like Go: trim trailing zeros/dot.
     s = f"{price:.6f}"
     s = s.rstrip("0").rstrip(".") if "." in s else s
     return {"USD": s}
 
 
 def _product(price: float) -> dict:
-    return {"onDemandPricing": [{"priceDimensions": [{"pricePerUnit": _usd(price)}]}]}
+    # NEW SHAPE: {"prices": [{"USD": "<value>"}]}
+    return {"prices": [{"USD": _usd(price)["USD"]}]}
 
 
 # ---------- Attribute helpers (REGEX-aware) ----------
-
 
 def _attrs_index(attrs):
     """Build an index: key -> list of dicts {op, value, raw}."""
@@ -209,7 +209,6 @@ class H(BaseHTTPRequestHandler):
 # Self-tests (no pytest)
 # -------------------
 
-
 def _normalize_tenancy(v):
     return "Dedicated" if f"{v}" == "dedicated" else "Shared"
 
@@ -275,8 +274,9 @@ def _run_self_tests():
     ), "UnderBilling must not match"
 
     # 3) Fixture smoke: exercise 8GB default path (no size in root_block_device)
+    import json as _json
     with open("test.json", "r", encoding="utf-8") as f:
-        plan = json.load(f)
+        plan = _json.load(f)
 
     inst = next(
         r
@@ -317,5 +317,5 @@ if __name__ == "__main__":
         print(f"MODE={MODE}  DEFAULT_PRICE={DEFAULT_PRICE}")
         for k, v in OVERRIDE.items():
             print(f"  {k}={v}")
-        #HTTPServer(("127.0.0.1", 4000), H).serve_forever() for local CLI
+        # HTTPServer(("127.0.0.1", 4000), H).serve_forever() for local CLI
         HTTPServer(("0.0.0.0", 4000), H).serve_forever()

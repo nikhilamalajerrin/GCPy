@@ -46,6 +46,10 @@ def _render(rows: List[List[str]]) -> str:
 
 
 def to_table(breakdowns: Any, no_color: bool = False) -> str:
+    """
+    Accepts the list returned by base.costs.generate_cost_breakdowns and renders a table.
+    Colors are not used; `no_color` is accepted for API parity.
+    """
     data: List[Dict[str, Any]] = json.loads(to_json(breakdowns))
     rows: List[List[str]] = []
     overall_h = Decimal("0")
