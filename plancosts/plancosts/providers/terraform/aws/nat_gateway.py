@@ -1,3 +1,4 @@
+# plancosts/providers/terraform/aws/nat_gateway.py
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -5,18 +6,19 @@ from typing import Any, Dict
 from plancosts.resource.filters import Filter
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
+
 class NatGatewayHours(BaseAwsPriceComponent):
     def __init__(self, resource: "NatGateway") -> None:
         super().__init__(name="Hours", resource=resource, time_unit="hour")
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="NAT Gateway"),
-            Filter(key="usagetype", value="/NatGateway-Hours/", operation="REGEX"),
+            Filter(key="usagetype", value="NatGateway-Hours"),  # Exact match
         ]
-        self.unit_ = "hour"
-        self.SetQuantityMultiplierFunc(lambda r: 1)
+        self.SetQuantityMultiplierFunc(lambda _: 1)
+
 
 class NatGateway(BaseAwsResource):
-    def __init__(self, address: str, region: str, raw_values: Dict[str, Any]) -> None:
+    def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
         super().__init__(address, region, raw_values)
         self._set_price_components([NatGatewayHours(self)])

@@ -14,13 +14,19 @@ def _normalize_tenancy(v: object) -> str:
 
 class Ec2LaunchConfigurationHours(BaseAwsPriceComponent):
     def __init__(self, resource: "Ec2LaunchConfiguration") -> None:
-        super().__init__(name="Instance hours", resource=resource, time_unit="hour")
+        # Match Go label: "instance hours (<instance_type>)"
+        it = resource.raw_values().get("instance_type") or ""
+        name = f"instance hours ({it})" if it else "instance hours"
+        super().__init__(name=name, resource=resource, time_unit="hour")
+
+        # Attribute-style filters (Go parity)
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="Compute Instance"),
             Filter(key="operatingSystem", value="Linux"),
             Filter(key="preInstalledSw", value="NA"),
             Filter(key="capacitystatus", value="Used"),
+            # tenancy defaults to Shared; ValueMapping can override to Dedicated
             Filter(key="tenancy", value="Shared"),
         ]
         self.value_mappings = [
@@ -31,6 +37,8 @@ class Ec2LaunchConfigurationHours(BaseAwsPriceComponent):
                 map_func=_normalize_tenancy,
             ),
         ]
+        # 1 unit per hour (explicit for consistency)
+        self.SetQuantityMultiplierFunc(lambda r: 1)
 
 
 class Ec2LaunchConfiguration(BaseAwsResource):

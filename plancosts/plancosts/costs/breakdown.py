@@ -1,9 +1,8 @@
-# plancosts/costs/breakdown.py
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from typing import Any, Dict, List
 
 from plancosts.resource.resource import PriceComponent, Resource
@@ -29,18 +28,52 @@ class ResourceCostBreakdown:
     sub_resource_costs: List["ResourceCostBreakdown"]
 
 
-def _create_price_component_cost(pc: PriceComponent, query_result: Any) -> PriceComponentCost:
+def _create_price_component_cost(pc: PriceComponent, _query_result: Any) -> PriceComponentCost:
     hourly = pc.hourly_cost()
     monthly = _round6(hourly * HOURS_IN_MONTH)
     return PriceComponentCost(price_component=pc, hourly_cost=hourly, monthly_cost=monthly)
 
 
-def _set_price_component_price(resource: Resource, pc: PriceComponent, query_result: Any) -> None:
+def _extract_price_usd_from_result(query_result: Any) -> Decimal:
+    """
+    Preferred:
+      data.products[].prices[].USD
+    Fallback (legacy aws-prices-graphql):
+      data.products[].onDemandPricing[].priceDimensions[].pricePerUnit.USD
+    """
     try:
         products = (query_result or {}).get("data", {}).get("products", []) or []
-        res_addr = resource.address()
-        pc_name = pc.name()
+        if not products:
+            return Decimal("0")
 
+        p0 = products[0]
+
+        prices = p0.get("prices")
+        if isinstance(prices, list) and prices:
+            usd = prices[0].get("USD")
+            if usd is not None:
+                return Decimal(str(usd))
+
+        odp = p0.get("onDemandPricing")
+        if isinstance(odp, list) and odp:
+            dims = odp[0].get("priceDimensions") or []
+            if dims:
+                usd = (dims[0].get("pricePerUnit") or {}).get("USD")
+                if usd is not None:
+                    return Decimal(str(usd))
+    except InvalidOperation:
+        logging.debug("Price string could not be parsed; treating as 0. (%s)", query_result)
+    except Exception:
+        pass
+
+    return Decimal("0")
+
+
+def _set_price_component_price(resource: Resource, pc: PriceComponent, query_result: Any) -> None:
+    res_addr = resource.address()
+    pc_name = pc.name()
+    try:
+        products = (query_result or {}).get("data", {}).get("products", []) or []
         if not products:
             logging.warning("No prices found for %s %s, using 0.00", res_addr, pc_name)
             price = Decimal("0")
@@ -51,21 +84,17 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
                     res_addr,
                     pc_name,
                 )
-            p0 = products[0]
-            price_str = (
-                p0.get("onDemandPricing", [{}])[0]
-                  .get("priceDimensions", [{}])[0]
-                  .get("pricePerUnit", {})
-                  .get("USD", "0")
-            )
-            price = Decimal(str(price_str))
+            price = _extract_price_usd_from_result(query_result)
     except Exception:
         price = Decimal("0")
 
     pc.set_price(price)
 
 
-def _get_cost_breakdown(resource: Resource, results: Dict[Resource, Dict[PriceComponent, Any]]) -> ResourceCostBreakdown:
+def _get_cost_breakdown(
+    resource: Resource,
+    results: Dict[Resource, Dict[PriceComponent, Any]],
+) -> ResourceCostBreakdown:
     pc_costs: List[PriceComponentCost] = []
     for pc in resource.price_components():
         result = results.get(resource, {}).get(pc)
@@ -87,40 +116,34 @@ def generate_cost_breakdowns(
     resources: List[Resource],
 ) -> List[ResourceCostBreakdown]:
     """
-    Go-parity pipeline:
+    Pipeline equivalent to pkg/costs/breakdown.go:
       1) Skip non-costable resources before querying.
       2) For each costable resource, batch GraphQL queries and collect results.
       3) Set the unit price on each price component using its query result.
-      4) Build recursive cost breakdown trees; sort by resource address.
+      4) Build recursive breakdown trees; sort by resource address.
     """
     cost_breakdowns: List[ResourceCostBreakdown] = []
-
-    # 1) Query only resources that have cost (Go: if !resource.HasCost() continue)
     results_by_resource: Dict[Resource, Dict[PriceComponent, Any]] = {}
-    per_resource_results: Dict[Resource, Dict[Resource, Dict[PriceComponent, Any]]] = {}
 
     for r in resources:
         if not r.has_cost():
             continue
-        # Runner returns {resource_or_subresource: {pc: result}}
-        res_map = runner.run_queries(r)
-        per_resource_results[r] = res_map
-        # Also aggregate into a single map so lookups during breakdown are O(1)
+
+        res_map = runner.run_queries(r)  # {resource_or_subresource: {pc: result}}
+
+        # set prices from this batch
         for rr, pc_map in res_map.items():
             results_by_resource.setdefault(rr, {}).update(pc_map)
-
-        # 2) Set unit price for each (pc, result) in this resource's map
-        for rr, pc_map in res_map.items():
             for pc, result in pc_map.items():
                 _set_price_component_price(rr, pc, result)
 
-    # 3) Build breakdowns (skip non-costable like Go)
+    # Build breakdowns
     for r in resources:
         if not r.has_cost():
             continue
         cost_breakdowns.append(_get_cost_breakdown(r, results_by_resource))
 
-    # 4) Stable sort by address (Go sorts in output)
+    # Stable order by address
     cost_breakdowns.sort(key=lambda b: b.resource.address())
     return cost_breakdowns
 

@@ -1,12 +1,12 @@
 # plancosts/parsers/terraform.py
 """
-Python port of pkg/parsers/terraform/terraform.go (before the later "resource" package split).
+Python port of pkg/parsers/terraform/terraform.go.
 
 - Uses provider-config region, overridden by ARN region if present.
 - Creates typed AWS resources via plancosts.providers.terraform.aws.* constructors.
-- Recursively parses child modules and wires references found in configuration.*.resources[*].expressions
+- Recursively parses child modules and wires references found in
+  configuration.*.resources[*].expressions
   (supports both {"references":[...]} and [{"id":{"references":[...]}}] shapes).
-- Top-level LC/LT are created with has_cost=False only if your class signatures require it; otherwise plain (address, region, raw_values).
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ import subprocess
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from plancosts.resource.resource import Resource # your existing base interfaces
+from plancosts.resource.resource import Resource
 
-# Typed AWS resources (match your earlier Python files under providers/terraform/aws)
+# Typed AWS resources
 from plancosts.providers.terraform.aws.ec2_instance import Ec2Instance
 from plancosts.providers.terraform.aws.ebs_volume import EbsVolume
 from plancosts.providers.terraform.aws.ebs_snapshot import EbsSnapshot
@@ -35,6 +35,14 @@ from plancosts.providers.terraform.aws.ec2_autoscaling_group import (
 from plancosts.providers.terraform.aws.rds_instance import RdsInstance
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
+
+
+__all__ = [
+    "load_plan_json",
+    "generate_plan_json",
+    "parse_plan_json",
+    "parse_plan_file",
+]
 
 
 # ---------------- Terraform command helpers ----------------
@@ -118,7 +126,12 @@ def _select_region(provider_region: str, raw: Dict[str, Any]) -> str:
 
 # ---------------- Resource creation ----------------
 
-def _create_resource(resource_type: str, address: str, raw: Dict[str, Any], provider_region: str) -> Optional[Resource]:
+def _create_resource(
+    resource_type: str,
+    address: str,
+    raw: Dict[str, Any],
+    provider_region: str,
+) -> Optional[Resource]:
     aws_region = _select_region(provider_region, raw)
 
     if resource_type == "aws_instance":
@@ -130,7 +143,7 @@ def _create_resource(resource_type: str, address: str, raw: Dict[str, Any], prov
     if resource_type == "aws_ebs_snapshot_copy":
         return EbsSnapshotCopy(address, aws_region, raw)
     if resource_type == "aws_launch_configuration":
-        # If your Ec2LaunchConfiguration signature requires has_cost, pass it here:
+        # Handle both class signatures (with/without has_cost)
         try:
             return Ec2LaunchConfiguration(address, aws_region, raw, has_cost=False)
         except TypeError:
@@ -165,7 +178,9 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
     elif isinstance(plan_json, dict):
         plan = plan_json
     else:
-        raise TypeError(f"parse_plan_json expected bytes|str|dict, got {type(plan_json).__name__}")
+        raise TypeError(
+            f"parse_plan_json expected bytes|str|dict, got {type(plan_json).__name__}"
+        )
 
     provider_region = _provider_region(plan)
 
@@ -173,8 +188,15 @@ def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Resource]:
     root_cfg = plan.get("configuration", {}).get("root_module", {}) or {}
 
     resources: List[Resource] = []
-    _parse_module(plan, provider_region, root_pv, root_cfg, module_addr="", out_list=resources)
-    # Stable ordering
+    _parse_module(
+        plan,
+        provider_region,
+        root_pv,
+        root_cfg,
+        module_addr="",
+        out_list=resources,
+    )
+    # Stable ordering like Go (Address sort)
     return sorted(resources, key=lambda r: r.address())
 
 
@@ -194,16 +216,19 @@ def _parse_module_name(module_addr: str) -> str:
 
 
 def _get_internal_name(resource_addr: str, module_addr: str) -> str:
-    # Trim "module.<...>." prefix like the Go helper getInternalName
+    # Trim "<module>." prefix like the Go helper
     if not module_addr:
         return resource_addr
     prefix = module_addr + "."
     return resource_addr[len(prefix):] if resource_addr.startswith(prefix) else resource_addr
 
 
-# --- recursive helper like Go's addReferencesHelper ---
-
-def _add_references_helper(r: Resource, key: str, value: Any, resource_map: Dict[str, Resource]) -> None:
+def _add_references_helper(
+    r: Resource,
+    key: str,
+    value: Any,
+    resource_map: Dict[str, Resource],
+) -> None:
     ref_addr = None
 
     # Shape A: {"references": ["addr", ...]}
@@ -222,17 +247,20 @@ def _add_references_helper(r: Resource, key: str, value: Any, resource_map: Dict
         r.add_reference(key, resource_map[ref_addr])
         return
 
-    # Recurse into nested JSON (mirrors Go's valueJSON.Type == "JSON")
+    # Recurse nested JSON
     if isinstance(value, dict):
         for k, v in value.items():
             _add_references_helper(r, k, v, resource_map)
 
 
-def _add_references(r: Resource, resource_json: Dict[str, Any], resource_map: Dict[str, Resource]) -> None:
+def _add_references(
+    r: Resource,
+    resource_json: Dict[str, Any],
+    resource_map: Dict[str, Resource],
+) -> None:
     expressions = resource_json.get("expressions")
     if isinstance(expressions, dict):
         _add_references_helper(r, "expressions", expressions, resource_map)
-
 
 
 def _parse_module(
@@ -274,5 +302,7 @@ def _parse_module(
                 (config_module.get("module_calls") or {}).get(module_name) or {}
             ).get("module") or {}
 
-        next_module_addr = child_addr if not module_addr else f"{module_addr}.{child_addr}"
+        next_module_addr = (
+            child_addr if not module_addr else f"{module_addr}.{child_addr}"
+        )
         _parse_module(plan, provider_region, child, child_cfg, next_module_addr, out_list)

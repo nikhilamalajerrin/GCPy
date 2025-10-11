@@ -1,3 +1,4 @@
+# plancosts/tests/mocks.py
 from __future__ import annotations
 
 from decimal import Decimal
@@ -8,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 class TestPriceComponent:
     """
-    Mirrors the Go testPriceComponent (post-commit):
+    Mirrors the Go testPriceComponent:
     - name
     - filters
     - SetPrice/Price
@@ -83,23 +84,21 @@ class TestResource:
         self._subs.append(r)
 
 
-# ---- Fake GraphQL layer (mirrors mocks.go behavior) ----
+# ---- Fake GraphQL layer (new JSON shape) ----
 
 def _graph_ql_result_for_price(price: Decimal) -> Dict[str, Any]:
     """
-    Generates the same JSON shape the Go tests expect:
-    data.products[0].onDemandPricing[0].priceDimensions[0].pricePerUnit.USD
+    Generates the JSON shape the updated Go tests expect:
+    data.products[0].prices[0].USD
     """
+    # Normalize decimal-as-string (like the Go mock).
+    s = f"{Decimal(price):f}"
     return {
         "data": {
             "products": [
                 {
-                    "onDemandPricing": [
-                        {
-                            "priceDimensions": [
-                                {"unit": "Hrs", "pricePerUnit": {"USD": f"{Decimal(price):f}"}}
-                            ]
-                        }
+                    "prices": [
+                        {"USD": s}
                     ]
                 }
             ]
@@ -107,12 +106,23 @@ def _graph_ql_result_for_price(price: Decimal) -> Dict[str, Any]:
     }
 
 
+def _flatten_subresources(r: TestResource) -> List[TestResource]:
+    out: List[TestResource] = []
+    stack = list(r.sub_resources())
+    while stack:
+        cur = stack.pop()
+        out.append(cur)
+        stack.extend(cur.sub_resources())
+    return out
+
+
 class TestQueryRunner:
     """
     Simple price source with optional overrides:
       overrides[(resource, price_component)] = price
-    run_queries(resource) returns the result map for top-level and immediate sub-resources,
-    mirroring the Go mock’s batching.
+
+    run_queries(resource) returns the result map for the resource and all *flattened*
+    sub-resources, mirroring the Go mock’s batching.
     """
     def __init__(self) -> None:
         self.overrides: Dict[Tuple[TestResource, TestPriceComponent], Decimal] = {}
@@ -130,9 +140,10 @@ class TestQueryRunner:
         for pc in resource.price_components():
             results.setdefault(resource, {})[pc] = _graph_ql_result_for_price(self._get_price(resource, pc))
 
-        # Immediate sub-resources (commit batches only one level)
-        for sub in resource.sub_resources():
+        # Flattened sub-resources (match Go's resource.FlattenSubResources)
+        for sub in _flatten_subresources(resource):
             for pc in sub.price_components():
-                results.setdefault(resource, {})[pc] = _graph_ql_result_for_price(self._get_price(resource, pc))
+                # Important: key by the *sub-resource*, not the parent.
+                results.setdefault(sub, {})[pc] = _graph_ql_result_for_price(self._get_price(sub, pc))
 
         return results
