@@ -35,6 +35,7 @@ from plancosts.providers.terraform.aws.ec2_autoscaling_group import (
 from plancosts.providers.terraform.aws.rds_instance import RdsInstance
 from plancosts.providers.terraform.aws.elb import Elb
 from plancosts.providers.terraform.aws.nat_gateway import NatGateway
+from plancosts.providers.terraform.aws.dynamodb_table import DynamoDBTable  # NEW
 
 
 __all__ = [
@@ -163,6 +164,8 @@ def _create_resource(
         return Elb(address, aws_region, raw, is_classic=False)
     if resource_type == "aws_nat_gateway":
         return NatGateway(address, aws_region, raw)
+    if resource_type == "aws_dynamodb_table":  # NEW
+        return DynamoDBTable(address, aws_region, raw)
 
     return None
 
@@ -251,6 +254,9 @@ def _add_references_helper(
     if isinstance(value, dict):
         for k, v in value.items():
             _add_references_helper(r, k, v, resource_map)
+    elif isinstance(value, list):
+        for item in value:
+            _add_references_helper(r, key, item, resource_map)
 
 
 def _add_references(

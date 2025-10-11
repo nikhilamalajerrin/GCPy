@@ -1,4 +1,3 @@
-# plancosts/providers/terraform/aws/nat_gateway.py
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -9,11 +8,13 @@ from .base import BaseAwsPriceComponent, BaseAwsResource
 
 class NatGatewayHours(BaseAwsPriceComponent):
     def __init__(self, resource: "NatGateway") -> None:
-        super().__init__(name="Hours", resource=resource, time_unit="hour")
+        # commit parity: lowercase "hours"
+        super().__init__(name="hours", resource=resource, time_unit="hour")
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="NAT Gateway"),
-            Filter(key="usagetype", value="NatGateway-Hours"),  # Exact match
+            # exact match works with pricing.infracost.io
+            Filter(key="usagetype", value="NatGateway-Hours"),
         ]
         self.SetQuantityMultiplierFunc(lambda _: 1)
 

@@ -11,6 +11,7 @@ ARGS ?=
 DEV_PKGS  := black isort ruff mypy pytest build wheel
 
 .PHONY: deps run build clean test fmt lint typecheck check release help
+.DEFAULT_GOAL := help
 
 help:
 	@echo "make deps        - install dev dependencies"

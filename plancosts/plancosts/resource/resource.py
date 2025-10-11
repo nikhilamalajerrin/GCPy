@@ -1,7 +1,6 @@
 # plancosts/resource/resource.py
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Callable, Optional
 
@@ -33,26 +32,22 @@ class PriceComponent:
     # Required Go-style API
     def Name(self) -> str: ...
     def Unit(self) -> str: ...
+    def ProductFilter(self) -> Any: ...
+    def PriceFilter(self) -> Any: ...
     def Quantity(self) -> Decimal: ...
     def Price(self) -> Decimal: ...
     def SetPrice(self, price: Decimal) -> None: ...
     def HourlyCost(self) -> Decimal: ...
 
-    # These two are used by the query layer
-    def ProductFilter(self) -> Any: ...    # usually a dict (GraphQL filter) or None
-    def PriceFilter(self) -> Any: ...      # usually a dict (GraphQL filter) or None
-
     # Python-friendly aliases
     def name(self) -> str: return self.Name()
     def unit(self) -> str: return self.Unit()
+    def product_filter(self) -> Any: return self.ProductFilter()
+    def price_filter(self) -> Any: return self.PriceFilter()
     def quantity(self) -> Decimal: return self.Quantity()
     def price(self) -> Decimal: return self.Price()
     def set_price(self, price: Decimal) -> None: self.SetPrice(price)
     def hourly_cost(self) -> Decimal: return self.HourlyCost()
-
-    # Convenience (query layer calls these)
-    def product_filter(self) -> Any: return self.ProductFilter()
-    def price_filter(self) -> Any: return self.PriceFilter()
 
 
 class Resource:
@@ -79,6 +74,7 @@ class Resource:
     def references(self) -> Dict[str, "Resource"]: return self.References()
     def add_reference(self, name: str, res: "Resource") -> None: self.AddReference(name, res)
     def resource_count(self) -> int: return self.ResourceCount()
+    def set_resource_count(self, count: int) -> None: self.SetResourceCount(count)
     def has_cost(self) -> bool: return self.HasCost()
 
 
@@ -105,7 +101,11 @@ class BasePriceComponent(PriceComponent):
         self._quantity_fn: Optional[Callable[[Resource], Decimal]] = None
         self._price: Decimal = Decimal(0)
 
-        # IMPORTANT: keep these so GraphQLQueryRunner can call pc.product_filter()/price_filter()
+        # Keep these so query runner can call pc.product_filter()/price_filter()
+        # ProductFilter structure should use keys compatible with the Go structs:
+        #   ProductFilter: vendorName, service, productFamily, region, sku, attributeFilters
+        #   AttributeFilter: key, value OR valueRegex
+        #   PriceFilter: purchaseOption, unit, description, descriptionRegex, termLength, termPurchaseOption, termOfferingClass
         self._product_filter: Optional[Dict[str, Any]] = None
         self._price_filter: Optional[Dict[str, Any]] = None
 
@@ -116,12 +116,19 @@ class BasePriceComponent(PriceComponent):
     def Unit(self) -> str:
         return self._unit
 
+    def ProductFilter(self) -> Any:
+        return self._product_filter
+
+    def PriceFilter(self) -> Any:
+        return self._price_filter
+
     def Quantity(self) -> Decimal:
         qty = Decimal(1)
         if self._quantity_fn is not None:
             try:
                 qty *= Decimal(self._quantity_fn(self._resource))
             except Exception:
+                # match Go behavior: ignore multiplier errors
                 pass
 
         month = _TIME_UNIT_SECS["month"]
@@ -143,21 +150,16 @@ class BasePriceComponent(PriceComponent):
     def HourlyCost(self) -> Decimal:
         hour = _TIME_UNIT_SECS["hour"]
         month = _TIME_UNIT_SECS["month"]
+        # price * Quantity * (hour / month) == price * Quantity / (month/hour) in Go
         return self._price * self.Quantity() * (hour / month)
 
-    # -- Filters for GraphQL --
-    def ProductFilter(self) -> Any:
-        # dict matching GraphQL ProductFilter (or None)
-        return self._product_filter
-
-    def PriceFilter(self) -> Any:
-        # dict matching GraphQL PriceFilter (or None)
-        return self._price_filter
-
+    # -- Filters for GraphQL (setters) --
     def SetProductFilter(self, pf: Optional[Dict[str, Any]]) -> None:
+        # Expect keys compatible with Go JSON tags (e.g., "descriptionRegex")
         self._product_filter = dict(pf) if isinstance(pf, dict) else None
 
     def SetPriceFilter(self, pf: Optional[Dict[str, Any]]) -> None:
+        # Expect keys compatible with Go JSON tags (e.g., "descriptionRegex")
         self._price_filter = dict(pf) if isinstance(pf, dict) else None
 
     # Python-friendly (query layer also calls these)
@@ -170,7 +172,7 @@ class BasePriceComponent(PriceComponent):
 
 class BaseResource(Resource):
     """
-    Mirrors Go's BaseResource.
+    Mirrors Go's BaseResource with stable ordering for SubResources and PriceComponents.
     """
 
     def __init__(self, address: str, raw_values: Dict[str, Any], has_cost: bool):
@@ -190,12 +192,14 @@ class BaseResource(Resource):
         return self._raw_values
 
     def SubResources(self) -> List[Resource]:
+        # Sort alphabetically by address (Go does sort.Slice on access)
         return sorted(self._sub_resources, key=lambda r: r.Address())
 
     def AddSubResource(self, sub: Resource) -> None:
         self._sub_resources.append(sub)
 
     def PriceComponents(self) -> List[PriceComponent]:
+        # Sort by component name for stable output (matches Go)
         return sorted(self._price_components, key=lambda pc: pc.Name())
 
     def AddPriceComponent(self, pc: PriceComponent) -> None:

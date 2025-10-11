@@ -1,16 +1,13 @@
 # plancosts/providers/terraform/aws/base.py
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Callable, Dict, List, Optional
 
 from plancosts.resource.filters import Filter, ValueMapping, map_filters, merge_filters
 
-# ----------------------------
-# Constants / helpers
-# ----------------------------
+DEFAULT_VOLUME_SIZE = 8  # Go parity
 
-DEFAULT_VOLUME_SIZE = 8  # matches Go DefaultVolumeSize = 8
 
 def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
     if isinstance(val, Decimal):
@@ -22,32 +19,19 @@ def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
     except Exception:
         return default
 
+
 def region_filters(region: str) -> List[Filter]:
-    """No-op kept for back-compat with earlier code that calls regionFilters(region)."""
     return []
+
 
 def str_ptr(s: str) -> str:
     return s
 
-# ----------------------------
-# Base AWS Price Component
-# ----------------------------
 
 class BaseAwsPriceComponent:
     """
-    Go-parity price component with:
-      - default_filters: List[Filter]
-      - value_mappings: List[ValueMapping]
-      - quantity fn
-      - price
-      - time_unit_ ("hour" | "month")
-      - unit_ (display unit)
-    Plus Python helpers:
-      - product_filter() -> dict (Go ProductFilter-like shape)
-      - price_filter()   -> dict | None
-      - set_price_filter(dict)
-      - set_product_filter_override(dict)
-      - calculate_hourly_cost(price)
+    AWS-specific price component with Go-parity-ish API and helpers
+    that the GraphQL query layer expects (product_filter/price_filter).
     """
 
     def __init__(self, name: str, resource: "BaseAwsResource", time_unit: str):
@@ -60,11 +44,10 @@ class BaseAwsPriceComponent:
         self.unit_: str = self.time_unit_
         self._quantity_fn: Callable[[BaseAwsResource], Decimal] = lambda r: Decimal(1)
 
-        # New: synthesized product/price filters for GraphQL queries
         self._price_filter_dict: Optional[Dict[str, Any]] = None
-        self._product_filter_override: Optional[Dict[str, Any]] = None  # if a PC wants to fully control it
+        self._product_filter_override: Optional[Dict[str, Any]] = None
 
-    # ---- Go-parity methods ----
+    # ---- Go-parity-ish ----
     def AwsResource(self) -> "BaseAwsResource":
         return self.resource_
 
@@ -78,12 +61,19 @@ class BaseAwsPriceComponent:
         return self.resource_
 
     def Filters(self) -> List[Filter]:
-        # Only default_filters + value-mapped filters (region filters are removed)
         mapped = map_filters(self.value_mappings, self.resource_.RawValues())
         return merge_filters(self.default_filters, mapped)
 
+    # unit price storage
     def SetPrice(self, price: Decimal) -> None:
         self.price_ = _to_decimal(price, Decimal(0))
+
+    def Price(self) -> Decimal:
+        return self.price_
+
+    # compatibility alias for tests (pc.price_component.price())
+    def price(self) -> Decimal:
+        return self.Price()
 
     def HourlyCost(self) -> Decimal:
         return self.calculate_hourly_cost(self.price_)
@@ -99,7 +89,6 @@ class BaseAwsPriceComponent:
         except Exception:
             qty = Decimal(1)
 
-        # month/time-unit conversion
         time_unit_secs = {
             "hour": Decimal(60 * 60),
             "month": Decimal(60 * 60 * 730),
@@ -112,17 +101,12 @@ class BaseAwsPriceComponent:
             time_unit_multiplier = Decimal(1)
 
         count = Decimal(self.resource_.ResourceCount() if hasattr(self.resource_, "ResourceCount") else 1)
-
         return (qty * time_unit_multiplier * count).quantize(Decimal("0.000001"))
 
     def SetQuantityMultiplierFunc(self, fn: Callable[["BaseAwsResource"], Decimal]) -> None:
         self._quantity_fn = fn
 
-    # --- compatibility alias used by wrappers (e.g., ASG) ---
-    def get_filters(self) -> List[Filter]:
-        return self.Filters()
-
-    # ---- Python-friendly aliases ----
+    # --- convenience aliases ---
     def name(self) -> str:
         return self.Name()
 
@@ -147,18 +131,10 @@ class BaseAwsPriceComponent:
     # ----------------------------
     #  GraphQL Query helpers
     # ----------------------------
-
     def _synth_product_filter(self) -> Dict[str, Any]:
         """
-        Build a Go-like ProductFilter:
-          {
-            "vendorName": "aws",
-            "service": "...",
-            "productFamily": "...",
-            "region": "<aws-region>",
-            "attributeFilters": [{"key": "...", "value": "..."} or {"key": "...", "valueRegex": "..."}]
-          }
-        We lift "servicecode" -> service, "productFamily" -> productFamily, everything else goes to attributeFilters.
+        Build a Go-like ProductFilter and SKIP empty/None values in attributeFilters.
+        This prevents over-constraining queries like {"databaseEdition": ""}.
         """
         if self._product_filter_override is not None:
             return dict(self._product_filter_override)
@@ -169,7 +145,10 @@ class BaseAwsPriceComponent:
 
         for f in self.Filters():
             k = (f.key or "").strip()
-            # lift common fields
+            if not k:
+                continue
+
+            # Lift common fields
             if k.lower() == "servicecode" and f.value:
                 service = str(f.value)
                 continue
@@ -177,13 +156,16 @@ class BaseAwsPriceComponent:
                 product_family = str(f.value)
                 continue
 
-            # attribute filter entry
-            entry: Dict[str, Any] = {"key": k}
-            if f.operation and f.operation.upper() == "REGEX":
-                entry["valueRegex"] = str(f.value)
+            # Prepare attribute entry — skip empty values
+            op = (f.operation or "").upper()
+            v = "" if f.value is None else str(f.value)
+            if not v:
+                continue
+
+            if op == "REGEX":
+                attrs.append({"key": k, "valueRegex": v})
             else:
-                entry["value"] = str(f.value)
-            attrs.append(entry)
+                attrs.append({"key": k, "value": v})
 
         return {
             "vendorName": "aws",
@@ -194,19 +176,12 @@ class BaseAwsPriceComponent:
         }
 
     def product_filter(self) -> Dict[str, Any]:
-        """
-        Called by QueryRunner. MUST be callable and return a dict.
-        """
         return self._synth_product_filter()
 
     def set_product_filter_override(self, pf: Optional[Dict[str, Any]]) -> None:
         self._product_filter_override = dict(pf) if pf else None
 
     def price_filter(self) -> Optional[Dict[str, Any]]:
-        """
-        Called by QueryRunner. MUST be callable and return a dict or None.
-        Example: {"purchaseOption": "on_demand"} or {"purchaseOption": "spot"}
-        """
         return dict(self._price_filter_dict) if isinstance(self._price_filter_dict, dict) else None
 
     def set_price_filter(self, pf: Optional[Dict[str, Any]]) -> None:
@@ -215,10 +190,10 @@ class BaseAwsPriceComponent:
     # ----------------------------
     #  Math helpers for wrappers
     # ----------------------------
-
     def calculate_hourly_cost(self, unit_price: Decimal) -> Decimal:
         """
         Convert a unit price (per time_unit_) to hourly and scale by quantity.
+        Only round at the end to avoid magnifying errors in monthly math.
         """
         unit_price = _to_decimal(unit_price, Decimal(0))
         time_unit_secs = {
@@ -227,17 +202,15 @@ class BaseAwsPriceComponent:
         }
         hour = time_unit_secs["hour"]
         month = time_unit_secs["month"]
-        # Quantity() already includes (month / time_unit_) * count
-        # So to get hourly cost: price * Quantity() * (hour / month)
         try:
-            month_to_hour = hour / month
+            month_to_hour = hour / month  # 1/730
         except (InvalidOperation, ZeroDivisionError):
             month_to_hour = Decimal(1)
-        return (unit_price * self.Quantity() * month_to_hour).quantize(Decimal("0.0000001"))
 
-# ----------------------------
-# Base AWS Resource
-# ----------------------------
+        hourly = unit_price * self.Quantity() * month_to_hour
+        # Quantize to 10 dp to match API price granularity and satisfy equality checks
+        return hourly.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
 
 class BaseAwsResource:
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
@@ -250,7 +223,7 @@ class BaseAwsResource:
         self._has_cost: bool = True
         self._resource_count: int = 1
 
-    # ---- Go-parity methods ----
+    # ---- Go-parity-ish ----
     def Address(self) -> str:
         return self.address_
 
@@ -261,10 +234,12 @@ class BaseAwsResource:
         return self.raw_values_
 
     def SubResources(self) -> List["BaseAwsResource"]:
-        return sorted(self.sub_resources_, key=lambda r: r.Address())
+        # Preserve insertion order to match expected test ordering
+        return list(self.sub_resources_)
 
     def PriceComponents(self) -> List[BaseAwsPriceComponent]:
-        return sorted(self.price_components_, key=lambda pc: pc.Name())
+        # Preserve insertion order
+        return list(self.price_components_)
 
     def References(self) -> Dict[str, "BaseAwsResource"]:
         return self.references_

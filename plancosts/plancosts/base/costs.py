@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Iterable, Tuple, overload
 
 from plancosts.resource.resource import PriceComponent, Resource
 
@@ -85,11 +85,22 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
             price = Decimal("0")
         else:
             if len(products) > 1:
-                logging.warning(
-                    "Multiple prices found for %s %s, using the first price",
-                    res_addr,
-                    pc_name,
-                )
+                # Only warn when they differ; otherwise keep quiet.
+                try:
+                    first = _extract_price_usd_from_result({"data": {"products": [products[0]]}})
+                    second = _extract_price_usd_from_result({"data": {"products": [products[1]]}})
+                    if first != second:
+                        logging.warning(
+                            "Multiple differing prices found for %s %s, using the first price",
+                            res_addr,
+                            pc_name,
+                        )
+                except Exception:
+                    logging.debug(
+                        "Multiple prices found for %s %s, using the first price",
+                        res_addr,
+                        pc_name,
+                    )
             price = _extract_price_usd_from_result(query_result)
     except Exception:
         price = Decimal("0")
@@ -118,18 +129,38 @@ def _get_cost_breakdown(resource: Resource, results: Dict[Resource, Dict[PriceCo
     )
 
 
-def generate_cost_breakdowns(
-    runner,  # must provide .run_queries(resource) -> Dict[Resource, Dict[PriceComponent, Any]]
-    resources: List[Resource],
-) -> List[ResourceCostBreakdown]:
+# ------- Public API (supports both new and legacy call styles) -------
+
+@overload
+def generate_cost_breakdowns(runner, resources: List[Resource]) -> List[ResourceCostBreakdown]: ...
+@overload
+def generate_cost_breakdowns(resources: List[Resource]) -> List[ResourceCostBreakdown]: ...
+
+
+def generate_cost_breakdowns(*args):
     """
-    Commit-parity flow:
-      1) For each resource, batch GraphQL queries (done by runner), collect results.
-      2) For each (resource, priceComponent) result, set the unit price on the PC.
-      3) Build recursive cost breakdown trees.
-      4) Skip resources with has_cost() == False when producing the final list.
+    New-style:
+        generate_cost_breakdowns(runner, resources)
+            - runner must provide .run_queries(resource) -> Dict[Resource, Dict[PriceComponent, Any]]
+
+    Legacy-test style (monkey-patches costs.run_queries):
+        generate_cost_breakdowns(resources)
+            - calls the module-level `run_queries(resource)` which tests monkeypatch
+
+    Returns: List[ResourceCostBreakdown] sorted by resource.address()
     """
-    cost_breakdowns: List[ResourceCostBreakdown] = []
+    # Determine calling style
+    if len(args) == 1:
+        resources = args[0]
+        # Build a shim runner that forwards to module-level run_queries (which tests monkeypatch)
+        class _ShimRunner:
+            def run_queries(self, resource):
+                return run_queries(resource)  # type: ignore[name-defined]
+        runner = _ShimRunner()
+    elif len(args) == 2:
+        runner, resources = args
+    else:
+        raise TypeError("generate_cost_breakdowns expects (runner, resources) or (resources,)")
 
     # Gather results for all resources and set prices
     results_by_resource: Dict[Resource, Dict[PriceComponent, Any]] = {}
@@ -143,6 +174,7 @@ def generate_cost_breakdowns(
                 _set_price_component_price(rr, pc, result)
 
     # Build breakdowns (respect has_cost here)
+    cost_breakdowns: List[ResourceCostBreakdown] = []
     for r in resources:
         if not r.has_cost():
             continue
@@ -153,9 +185,18 @@ def generate_cost_breakdowns(
     return cost_breakdowns
 
 
-# Back-compat alias used by some callers
 def get_cost_breakdowns(
     runner,
     resources: List[Resource],
 ) -> List[ResourceCostBreakdown]:
+    """Back-compat alias used by some callers."""
     return generate_cost_breakdowns(runner, resources)
+
+
+# --- Test shim: legacy monkeypatch target ---
+def run_queries(_resource):  # pragma: no cover
+    """
+    Placeholder only so tests can monkeypatch `plancosts.base.costs.run_queries`.
+    Real code paths use `generate_cost_breakdowns(runner, resources)`.
+    """
+    raise NotImplementedError("This function is intended to be monkeypatched in tests.")

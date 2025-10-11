@@ -11,14 +11,19 @@ class ElbHours(BaseAwsPriceComponent):
     def __init__(self, resource: "Elb", is_classic: bool) -> None:
         super().__init__(name="Hours", resource=resource, time_unit="hour")
 
+        # Classic ELB has a single product family. For aws_lb (ALB/NLB) we
+        # select family via load_balancer_type mapping below.
         default_family = "Load Balancer" if is_classic else "Load Balancer-Application"
 
         self.default_filters = [
             Filter(key="servicecode", value="AWSELB"),
             Filter(key="productFamily", value=default_family),
-            Filter(key="usagetype", value="LoadBalancerUsage"),  # Exact match
+            Filter(key="usagetype", value="LoadBalancerUsage"),  # exact match
         ]
 
+        # For aws_lb (not classic), map load_balancer_type -> productFamily
+        #   application -> Load Balancer-Application
+        #   network     -> Load Balancer-Network
         if not is_classic:
             self.value_mappings = [
                 ValueMapping(
@@ -30,6 +35,7 @@ class ElbHours(BaseAwsPriceComponent):
                 )
             ]
 
+        # 1 unit per hour
         self.SetQuantityMultiplierFunc(lambda _: 1)
 
 

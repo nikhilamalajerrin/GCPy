@@ -1,3 +1,4 @@
+# tests/unit/test_resource.py
 from __future__ import annotations
 
 from decimal import Decimal
@@ -62,7 +63,8 @@ def test_base_price_component_hourly_cost():
     assert hourly.HourlyCost().quantize(Decimal("0.00")) == Decimal("0.40")
 
     # Monthly price 7.3, multiplier 4:
-    # Quantity = 4; hourly cost = 7.3 * 4 / 730 = 0.04
+    # Quantity = 4 (per month); hourly conversion occurs inside HourlyCost()
+    # 7.3 * 4 / 730 = 0.04
     monthly.SetPrice(Decimal("7.3"))
     monthly.SetQuantityMultiplierFunc(lambda _r: Decimal(4))
     assert monthly.HourlyCost().quantize(Decimal("0.00")) == Decimal("0.04")
