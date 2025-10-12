@@ -94,12 +94,12 @@ def _set_price_component_price(resource: Resource, pc: PriceComponent, query_res
     try:
         products = (query_result or {}).get("data", {}).get("products", []) or []
         if not products:
-            logging.warning("No prices found for %s %s, using 0.00", res_addr, pc_name)
+            logging.warning("No products found for %s %s, using 0.00", res_addr, pc_name)
             price = Decimal("0")
         else:
             if len(products) > 1:
                 logging.warning(
-                    "Multiple prices found for %s %s, using the first price",
+                    "Multiple products found for %s %s, using the first product",
                     res_addr,
                     pc_name,
                 )
@@ -138,8 +138,8 @@ def _get_cost_breakdown(
     sub_costs: List[ResourceCostBreakdown] = []
     for sub in resource.sub_resources():
         sub_costs.append(_get_cost_breakdown(sub, results))
-    
-    # Sort sub_resource_costs by resource address for stable ordering
+
+    # Stable ordering for deterministic tests
     sub_costs.sort(key=lambda b: b.resource.address())
 
     return ResourceCostBreakdown(
@@ -186,8 +186,9 @@ def generate_cost_breakdowns(
     for r in resources:
         if not r.has_cost():
             continue
-            
+
         resource_results = runner.run_queries(r)
+        # resource_results is expected to be: { Resource: { PriceComponent: query_result } }
         results_by_resource.update(resource_results)
 
         for rr, pc_map in resource_results.items():

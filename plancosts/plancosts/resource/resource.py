@@ -1,10 +1,7 @@
-# plancosts/resource/resource.py
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Callable, Optional
-
-from plancosts.resource.filters import Filter  # simple key/value or regex filters
 
 __all__ = [
     "PriceComponent",
@@ -12,6 +9,9 @@ __all__ = [
     "BasePriceComponent",
     "BaseResource",
     "flatten_sub_resources",
+    # helpers
+    "new_base_resource",
+    "new_base_price_component",
 ]
 
 # ---- time unit seconds (Go: timeUnitSecs) ----
@@ -89,8 +89,9 @@ class BasePriceComponent(PriceComponent):
       - productFilter / priceFilter (dicts) for GraphQL layer
       - quantity multiplier func
       - price
+      - optional price override label (used by Lambda placeholder)
     Quantity()   = 1 * quantityMultiplier * (month/timeUnit) * resourceCount  [rounded to 6 dp]
-    HourlyCost() = Price() * Quantity() * (hour/month)
+    HourlyCost() = Price() * Quantity() * (hour / month)  (same as Go's divide by month/hour)
     """
 
     def __init__(self, name: str, resource: Resource, unit: str, time_unit: str):
@@ -101,13 +102,12 @@ class BasePriceComponent(PriceComponent):
         self._quantity_fn: Optional[Callable[[Resource], Decimal]] = None
         self._price: Decimal = Decimal(0)
 
-        # Keep these so query runner can call pc.product_filter()/price_filter()
-        # ProductFilter structure should use keys compatible with the Go structs:
-        #   ProductFilter: vendorName, service, productFamily, region, sku, attributeFilters
-        #   AttributeFilter: key, value OR valueRegex
-        #   PriceFilter: purchaseOption, unit, description, descriptionRegex, termLength, termPurchaseOption, termOfferingClass
+        # GraphQL filters (keys mirror Go JSON tags)
         self._product_filter: Optional[Dict[str, Any]] = None
         self._price_filter: Optional[Dict[str, Any]] = None
+
+        # Optional override label (e.g., "coming soon")
+        self._price_override_label: Optional[str] = None
 
     # -- Go API --
     def Name(self) -> str:
@@ -155,19 +155,30 @@ class BasePriceComponent(PriceComponent):
 
     # -- Filters for GraphQL (setters) --
     def SetProductFilter(self, pf: Optional[Dict[str, Any]]) -> None:
-        # Expect keys compatible with Go JSON tags (e.g., "descriptionRegex")
         self._product_filter = dict(pf) if isinstance(pf, dict) else None
 
     def SetPriceFilter(self, pf: Optional[Dict[str, Any]]) -> None:
-        # Expect keys compatible with Go JSON tags (e.g., "descriptionRegex")
         self._price_filter = dict(pf) if isinstance(pf, dict) else None
 
-    # Python-friendly (query layer also calls these)
+    # -- Price override label (Lambda placeholder etc.) --
+    def SetPriceOverrideLabel(self, label: Optional[str]) -> None:
+        self._price_override_label = label if label else None
+
+    # Python-friendly aliases
     def product_filter(self) -> Any:
         return self.ProductFilter()
 
     def price_filter(self) -> Any:
         return self.PriceFilter()
+
+    def set_quantity_multiplier_func(self, fn: Callable[[Resource], Decimal]) -> None:
+        self.SetQuantityMultiplierFunc(fn)
+
+    def set_price_override_label(self, label: Optional[str]) -> None:
+        self.SetPriceOverrideLabel(label)
+
+    def price_override_label(self) -> Optional[str]:
+        return self._price_override_label
 
 
 class BaseResource(Resource):
@@ -238,3 +249,31 @@ def flatten_sub_resources(resource: Resource) -> List[Resource]:
         if sub.SubResources():
             out.extend(flatten_sub_resources(sub))
     return out
+
+
+# =========================
+# Convenience constructors
+# =========================
+
+def new_base_resource(address: str, raw_values: Dict[str, Any], has_cost: bool) -> BaseResource:
+    return BaseResource(address, raw_values, has_cost)
+
+
+def new_base_price_component(
+    name: str,
+    resource: Resource,
+    unit: str,
+    hourly_unit: str,
+    product_filter: Optional[Dict[str, Any]] = None,
+    price_filter: Optional[Dict[str, Any]] = None,
+) -> BasePriceComponent:
+    """
+    Mirrors Go's NewBasePriceComponent signature order:
+      (name, resource, unit, timeUnit, productFilter, priceFilter)
+    """
+    pc = BasePriceComponent(name=name, resource=resource, unit=unit, time_unit=hourly_unit)
+    if product_filter is not None:
+        pc.SetProductFilter(product_filter)
+    if price_filter is not None:
+        pc.SetPriceFilter(price_filter)
+    return pc
