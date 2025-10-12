@@ -15,7 +15,8 @@ import pytest
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 from plancosts.costs.breakdown import generate_cost_breakdowns
 from plancosts.costs.query import GraphQLQueryRunner
-from plancosts.parsers.terraform import generate_plan_json, parse_plan_json  # if your project exposes these
+#from plancosts.parsers.terraform import generate_plan_json, parse_plan_json  # if your project exposes these
+from plancosts.terraform import load_plan_json, generate_plan_json, parse_plan_json
 
 PROVIDER_PREFIX = """
 provider "aws" {
