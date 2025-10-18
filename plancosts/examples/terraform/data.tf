@@ -1,33 +1,41 @@
-provider "aws" {
-  region = "us-east-1"
+# https://github.com/localstack/localstack could also be used to speed-up dev/test
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+    }
+    # TODO Enable once we have released terraform-provider-infracost
+    # infracost = {
+    #   source = "infracost.io/infracost/infracost"
+    # }
+  }
 }
+
+provider "aws" {
+  region                      = "us-east-1"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+  access_key                  = "mock_access_key"
+  secret_key                  = "mock_secret_key"
+}
+
+# TODO Enable once we have released terraform-provider-infracost
+# provider "infracost" {}
 
 data "aws_region" "current" {}
 
-data "aws_availability_zones" "available" {
-  state = "available"
+variable "availability_zone_names" {
+  type    = list(string)
+  default = ["us-east-1a", "us-east-1b"]
 }
 
-data "aws_vpc" "default" {
-  default = true
+variable "aws_subnet_ids" {
+  type    = list(string)
+  default = ["fake1", "fake2"]
 }
 
-data "aws_subnet_ids" "all" {
-  vpc_id = data.aws_vpc.default.id
-}
-
-data "aws_ami" "ubuntu" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-trusty-14.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  owners = ["099720109477"] # Canonical
+variable "aws_ami_id" {
+  type    = string
+  default = "fake1"
 }

@@ -1,160 +1,224 @@
-"""
-ASCII table rendering that mirrors the Go output in pkg/output/table.go:
-- Columns: NAME, QUANTITY, UNIT, HOURLY COST, MONTHLY COST
-- Shallow flatten of sub-resources (current resource + its immediate sub-resources)
-- Branch glyphs: '├─' for intermediate rows, '└─' for the last row
-- Totals per resource and an OVERALL TOTAL footer
-"""
-
+# plancosts/plancosts/output/table.py
 from __future__ import annotations
 
-import json
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List
+from typing import List, Any, Iterable, Optional
 
-from plancosts.output.json import to_json
+from plancosts.schema.resource import Resource
+from plancosts.schema.cost_component import CostComponent
+
+FMT_4DP = "{:.4f}"  # for price & costs
 
 
-def _to_decimal(x: Any) -> Decimal:
+# ---- helpers ---------------------------------------------------------------
+
+def _d(x) -> Decimal:
     if isinstance(x, Decimal):
         return x
     try:
-        # Handle numbers/strings cleanly; fall back to 0
         return Decimal(str(x))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
 
 
-def _fmt_cost(val: Any, pattern: str = "{:.4f}") -> str:
+def _fmt_4dp(val: Any) -> str:
     try:
-        return pattern.format(float(_to_decimal(val)))
+        return FMT_4DP.format(float(_d(val)))
     except Exception:
         return "0.0000"
 
 
 def _fmt_qty(val: Any) -> str:
     """
-    Go uses: strconv.FormatFloat(f, 'f', -1, 64)
-    That’s: decimal without trailing zeros.
+    Match Go: strconv.FormatFloat(f, 'f', -1, 64) → fixed-point, no trailing zeros.
     """
     try:
-        s = "{:f}".format(float(_to_decimal(val)))
+        s = "{:f}".format(float(_d(val)))
     except Exception:
         return "0"
     s = s.rstrip("0").rstrip(".")
-    return s if s else "0"
+    return s or "0"
 
 
 def _branch(i: int, total: int) -> str:
     return "└─" if i == total else "├─"
 
 
-def _render(rows: List[List[str]]) -> str:
-    # Compute column widths from content (no colors/borders, like our port)
-    name_w   = max((len(r[0]) for r in rows), default=4)
-    qty_w    = max((len(r[1]) for r in rows), default=8)
-    unit_w   = max((len(r[2]) for r in rows), default=4)
-    hourly_w = max((len(r[3]) for r in rows), default=11)
-    month_w  = max((len(r[4]) for r in rows), default=12)
+def _ensure_list(x: Optional[Iterable[Any]]) -> List[Any]:
+    return list(x) if x else []
 
-    line = f"{{:<{name_w}}}  {{:>{qty_w}}}  {{:<{unit_w}}}  {{:>{hourly_w}}}  {{:>{month_w}}}"
-    out = [line.format("NAME", "QUANTITY", "UNIT", "HOURLY COST", "MONTHLY COST")]
-    out += [line.format(*r) for r in rows]
+
+def _flattened_subresources(res: Resource) -> List[Resource]:
+    """
+    Full recursive flatten to mirror Go's FlattenedSubResources().
+    Includes all descendants depth-first.
+    """
+    out: List[Resource] = []
+    stack = _ensure_list(res.sub_resources)[:]
+    while stack:
+        sr = stack.pop(0)
+        out.append(sr)
+        children = _ensure_list(getattr(sr, "sub_resources", None))
+        if children:
+            stack[0:0] = children  # prepend to keep depth-first-ish order
+    return out
+
+
+def _line_item_count(res: Resource) -> int:
+    count = len(_ensure_list(res.cost_components))
+    for sr in _flattened_subresources(res):
+        count += len(_ensure_list(sr.cost_components))
+    return count
+
+
+# ---- component accessors (duck-typed) --------------------------------------
+
+def _cc_name(cc: CostComponent) -> str:
+    return getattr(cc, "name", None) or getattr(cc, "Name", None) or "<component>"
+
+
+def _cc_unit(cc: CostComponent) -> str:
+    return getattr(cc, "unit", None) or getattr(cc, "Unit", None) or ""
+
+
+def _monthly_quantity_of(cc: CostComponent) -> Decimal:
+    """
+    Prefer MonthlyQuantity() if exposed; else fall back to Quantity() or stored attrs.
+    """
+    if hasattr(cc, "MonthlyQuantity") and callable(cc.MonthlyQuantity):
+        try:
+            mq = cc.MonthlyQuantity()
+            if mq is not None:
+                return _d(mq)
+        except Exception:
+            pass
+    if hasattr(cc, "Quantity") and callable(cc.Quantity):
+        try:
+            return _d(cc.Quantity())
+        except Exception:
+            pass
+    for attr in ("monthly_quantity", "_monthly_quantity", "quantity"):
+        if hasattr(cc, attr):
+            return _d(getattr(cc, attr))
+    return Decimal("0")
+
+
+def _unit_price_of(cc: CostComponent) -> Decimal:
+    if hasattr(cc, "Price") and callable(cc.Price):
+        try:
+            return _d(cc.Price())
+        except Exception:
+            pass
+    if hasattr(cc, "price"):
+        return _d(getattr(cc, "price"))
+    return Decimal("0")
+
+
+def _hourly_cost_of(cc: CostComponent) -> Decimal:
+    if hasattr(cc, "HourlyCost") and callable(cc.HourlyCost):
+        try:
+            return _d(cc.HourlyCost())
+        except Exception:
+            pass
+    return _d(getattr(cc, "hourly_cost", 0))
+
+
+def _monthly_cost_of(cc: CostComponent) -> Decimal:
+    if hasattr(cc, "MonthlyCost") and callable(cc.MonthlyCost):
+        try:
+            return _d(cc.MonthlyCost())
+        except Exception:
+            pass
+    return _d(getattr(cc, "monthly_cost", 0))
+
+
+# ---- rendering -------------------------------------------------------------
+
+def _render_table(rows: List[List[str]]) -> str:
+    headers = ["NAME", "MONTHLY QTY", "UNIT", "PRICE", "HOURLY COST", "MONTHLY COST"]
+    all_rows = [headers] + rows
+
+    # Compute column widths using headers + data
+    name_w   = max(len(r[0]) for r in all_rows)
+    qty_w    = max(len(r[1]) for r in all_rows)
+    unit_w   = max(len(r[2]) for r in all_rows)
+    price_w  = max(len(r[3]) for r in all_rows)
+    hourly_w = max(len(r[4]) for r in all_rows)
+    month_w  = max(len(r[5]) for r in all_rows)
+
+    header_fmt = (
+        f"{{:<{name_w}}}  {{:>{qty_w}}}  {{:<{unit_w}}}  "
+        f"{{:>{price_w}}}  {{:>{hourly_w}}}  {{:>{month_w}}}"
+    )
+    row_fmt = header_fmt
+
+    out = [header_fmt.format(*headers)]
+    out += [row_fmt.format(*r) for r in rows]
     return "\n".join(out)
 
 
-def to_table(breakdowns: Any, no_color: bool = False, stable_sort: bool = False) -> str:
+def to_table(resources: List[Resource]) -> str:
     """
-    Render an ASCII table from the list returned by base.costs.generate_cost_breakdowns.
+    Text-table renderer matching Go's pkg/output/table.go:
 
-    Parameters
-    ----------
-    breakdowns : list[ResourceCostBreakdown] | JSON-serializable
-        The cost breakdowns.
-    no_color : bool
-        Accepted for API parity; colors are not used in this renderer.
-    stable_sort : bool
-        If True, sorts resources and subresources by their address for deterministic output
-        (useful in tests/snapshots). Default False to mirror the Go loop order.
+    Columns: NAME | MONTHLY QTY | UNIT | PRICE | HOURLY COST | MONTHLY COST
+    - Includes all sub-resources via a recursive flatten.
+    - Uses tree prefixes (├─/└─) and places subresource name in parentheses.
+    - Per-resource totals and a final OVERALL TOTAL row.
     """
-    data: List[Dict[str, Any]] = json.loads(to_json(breakdowns))
-
-    if stable_sort:
-        data.sort(key=lambda r: r.get("resource", ""))
-
     rows: List[List[str]] = []
+
     overall_h = Decimal("0")
     overall_m = Decimal("0")
 
-    for res in data:
-        title = res.get("resource", "") or ""
-        rows.append([title, "", "", "", ""])
+    for res in resources or []:
+        # Go prints resource.Name; fall back to address if needed.
+        display = getattr(res, "name", None) or getattr(res, "address", None) or "<resource>"
+        rows.append([display, "", "", "", "", ""])
 
-        subs = list(res.get("subresources", []) or [])
-        if stable_sort:
-            subs.sort(key=lambda s: s.get("resource", ""))
+        line_total = _line_item_count(res)
+        line_no = 0
 
-        # Compute total line items like Go:
-        # len(res.PriceComponentCosts) + sum(len(sub.PriceComponentCosts) for sub in flattenSubResourceBreakdowns(...))
-        # The Go flatten is shallow: include each immediate sub’s PriceComponentCosts only.
-        items = list(res.get("breakdown", []) or [])
-        for sub in subs:
-            items.extend(sub.get("breakdown", []) or [])
-        total_items = len(items)
+        res_h = Decimal("0")
+        res_m = Decimal("0")
 
-        i = 0
-        th = Decimal("0")
-        tm = Decimal("0")
+        # Top-level components (preserve incoming order like Go)
+        for cc in _ensure_list(res.cost_components):
+            line_no += 1
+            rows.append([
+                f"{_branch(line_no, line_total)} {_cc_name(cc)}",
+                _fmt_qty(_monthly_quantity_of(cc)),
+                _cc_unit(cc),
+                _fmt_4dp(_unit_price_of(cc)),
+                _fmt_4dp(_hourly_cost_of(cc)),
+                _fmt_4dp(_monthly_cost_of(cc)),
+            ])
+            res_h += _hourly_cost_of(cc)
+            res_m += _monthly_cost_of(cc)
 
-        # Top-level price components
-        for pc in (res.get("breakdown", []) or []):
-            i += 1
-            h = _to_decimal(pc.get("hourlyCost", 0))
-            m = _to_decimal(pc.get("monthlyCost", 0))
-            q = pc.get("quantity", 0)
-            u = pc.get("unit", "")
+        # All flattened sub-resources (recursive)
+        for sr in _flattened_subresources(res):
+            sr_name = getattr(sr, "name", None) or getattr(sr, "address", None) or ""
+            for cc in _ensure_list(sr.cost_components):
+                line_no += 1
+                rows.append([
+                    f"{_branch(line_no, line_total)} {_cc_name(cc)} ({sr_name})",
+                    _fmt_qty(_monthly_quantity_of(cc)),
+                    _cc_unit(cc),
+                    _fmt_4dp(_unit_price_of(cc)),
+                    _fmt_4dp(_hourly_cost_of(cc)),
+                    _fmt_4dp(_monthly_cost_of(cc)),
+                ])
+                res_h += _hourly_cost_of(cc)
+                res_m += _monthly_cost_of(cc)
 
-            th += h
-            tm += m
-            rows.append(
-                [
-                    f"{_branch(i, total_items)} {pc.get('priceComponent','')}",
-                    _fmt_qty(q),
-                    str(u or ""),
-                    _fmt_cost(h),
-                    _fmt_cost(m),
-                ]
-            )
+        # Per-resource total
+        rows.append(["Total", "", "", "", _fmt_4dp(res_h), _fmt_4dp(res_m)])
+        rows.append(["", "", "", "", "", ""])
 
-        # Immediate sub-resources’ price components, label = "<short-sub-addr> <pc-name>"
-        for sub in subs:
-            short = (sub.get("resource", "") or "").replace(f"{title}.", "", 1)
-            for pc in (sub.get("breakdown", []) or []):
-                i += 1
-                h = _to_decimal(pc.get("hourlyCost", 0))
-                m = _to_decimal(pc.get("monthlyCost", 0))
-                q = pc.get("quantity", 0)
-                u = pc.get("unit", "")
+        overall_h += res_h
+        overall_m += res_m
 
-                th += h
-                tm += m
-                rows.append(
-                    [
-                        f"{_branch(i, total_items)} {short} {pc.get('priceComponent','')}".strip(),
-                        _fmt_qty(q),
-                        str(u or ""),
-                        _fmt_cost(h),
-                        _fmt_cost(m),
-                    ]
-                )
-
-        # Resource totals
-        rows.append(["Total", "", "", _fmt_cost(th), _fmt_cost(tm)])
-        rows.append(["", "", "", "", ""])
-
-        overall_h += th
-        overall_m += tm
-
-    # Overall footer
-    rows.append(["OVERALL TOTAL", "", "", _fmt_cost(overall_h), _fmt_cost(overall_m)])
-    return _render(rows)
+    # Overall total
+    rows.append(["OVERALL TOTAL", "", "", "", _fmt_4dp(overall_h), _fmt_4dp(overall_m)])
+    return _render_table(rows)

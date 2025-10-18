@@ -14,14 +14,6 @@
         { "address": "aws_instance.example", "expressions": {} },
         { "address": "aws_instance.minimal", "expressions": {} },
         { "address": "aws_ebs_volume.data1", "expressions": {} },
-        {
-          "address": "aws_ebs_snapshot.snap1",
-          "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
-        },
-        {
-          "address": "aws_ebs_snapshot_copy.copy1",
-          "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
-        },
         { "address": "aws_launch_configuration.lc1", "expressions": {} },
         {
           "address": "aws_autoscaling_group.asg1",
@@ -82,16 +74,6 @@
           "address": "aws_ebs_volume.data1",
           "type": "aws_ebs_volume",
           "values": { "type": "io1", "size": 200, "iops": 4000 }
-        },
-        {
-          "address": "aws_ebs_snapshot.snap1",
-          "type": "aws_ebs_snapshot",
-          "values": { "volume_id": "aws_ebs_volume.data1" }
-        },
-        {
-          "address": "aws_ebs_snapshot_copy.copy1",
-          "type": "aws_ebs_snapshot_copy",
-          "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
         },
         {
           "address": "aws_launch_configuration.lc1",

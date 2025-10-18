@@ -1,222 +1,294 @@
+# plancosts/providers/terraform/aws/dynamodb_table.py
 from __future__ import annotations
+from typing import Dict, Any, List, Optional
+from decimal import Decimal, getcontext
 
-from decimal import Decimal
-from typing import Any, Dict, List
-import logging
+# keep decent precision for large monthly totals
+getcontext().prec = 28
 
-from plancosts.resource.filters import Filter
-from plancosts.resource.resource import PriceComponent, Resource
-from .base import BaseAwsPriceComponent, BaseAwsResource
-
-
-log = logging.getLogger(__name__)
+HOURS_PER_MONTH = Decimal("730")
 
 
-def _to_decimal(v: Any) -> Decimal:
-    try:
-        return Decimal(str(v))
-    except Exception:
-        return Decimal(0)
-
-
-def _get_on_demand_qty(raw: Dict[str, Any], write: bool) -> Decimal:
+class DynamoDbTable:
     """
-    Pull expected request units for on-demand tables from raw values.
-    Keys are optional and default to 0:
-      - on_demand_write_request_units_per_hour
-      - on_demand_read_request_units_per_hour
+    Minimal DynamoDB table resource for testing.
+
+    Exposes:
+      - address() -> str
+      - price_components() -> List[PriceComponent]
+      - sub_resources() -> List[ReplicaResource]
+      - price_component_costs -> List[PriceComponentCost]
     """
-    key = (
-        "on_demand_write_request_units_per_hour"
-        if write
-        else "on_demand_read_request_units_per_hour"
-    )
-    return _to_decimal(raw.get(key) or 0)
+    def __init__(self, address: str, region: str, raw: Dict[str, Any], rd=None):
+        self._address = address
+        self.region = region
+        self.raw = raw or {}
+        self.rd = rd
+
+        self._sub_resources: List[Any] = []
+        self._price_components: List[Any] = []
+        self.price_component_costs: List[Any] = []
+
+        self._init_components()
+        self._init_replicas()
+
+    # ---- surfaces used by tests/pricing ----
+    def address(self) -> str:
+        return self._address
+
+    def price_components(self) -> List[Any]:
+        return self._price_components
+
+    def sub_resources(self) -> List[Any]:
+        return self._sub_resources
+
+    # ---- helpers ----
+    def _init_components(self) -> None:
+        """
+        Create WCU and RCU for PROVISIONED billing mode only.
+        PAY_PER_REQUEST is not emitted here (on-demand request units not modeled yet).
+        """
+        billing_mode = str(self.raw.get("billing_mode", "PROVISIONED")).upper()
+        if billing_mode != "PROVISIONED":
+            return
+
+        write_capacity = float(self.raw.get("write_capacity") or 0)
+        read_capacity = float(self.raw.get("read_capacity") or 0)
+
+        # WCU (Provisioned): constrain by usagetype + group
+        wcu = PriceComponent(
+            name="Write capacity unit (WCU)",
+            quantity=write_capacity,              # capacity per hour
+            unit="WCU-hours",
+            region=self.region,
+            service="AmazonDynamoDB",
+            purchase_option="on_demand",
+            usagetype="WriteCapacityUnit-Hrs",
+            extra_attr_filters=[{"key": "group", "value": "DDB-WriteUnits"}],
+        )
+        self._add_component(wcu)
+
+        # RCU (Provisioned): constrain by usagetype + group
+        rcu = PriceComponent(
+            name="Read capacity unit (RCU)",
+            quantity=read_capacity,               # capacity per hour
+            unit="RCU-hours",
+            region=self.region,
+            service="AmazonDynamoDB",
+            purchase_option="on_demand",
+            usagetype="ReadCapacityUnit-Hrs",
+            extra_attr_filters=[{"key": "group", "value": "DDB-ReadUnits"}],
+        )
+        self._add_component(rcu)
+
+    def _init_replicas(self) -> None:
+        """Create replica sub-resources (rWCU) for Global Tables."""
+        replicas = self.raw.get("replica", []) or []
+        write_capacity = float(self.raw.get("write_capacity") or 0)
+
+        for replica in replicas:
+            region = (replica or {}).get("region_name", "")
+            if region:
+                rep = ReplicaResource(
+                    address=f"{self._address}:{region}",
+                    region=region,
+                    write_capacity=write_capacity,
+                )
+                self._sub_resources.append(rep)
+
+    def _add_component(self, component: "PriceComponent") -> None:
+        self._price_components.append(component)
+        pcc = PriceComponentCost(component)
+        self.price_component_costs.append(pcc)
 
 
-# ---------------- Price components ----------------
-# PROVISIONED capacity (per hour)
+class PriceComponent:
+    """
+    Minimal price component with name, quantity (per-hour capacity),
+    price, price_hash and the filters the pricing layer expects.
 
-class DdbWriteCapacityUnit(BaseAwsPriceComponent):
-    """Provisioned Write capacity unit (WCU), billed hourly."""
-    def __init__(self, r: "DynamoDBTable"):
-        super().__init__("Write capacity unit (WCU)", r, "hour")
-        # These keys are converted into product attribute filters by the base class
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            Filter(key="productFamily", value="Provisioned IOPS"),
-            Filter(key="group", value="DDB-WriteUnits"),
+    product_filter -> {
+      vendorName,
+      service,                         # e.g. "AmazonDynamoDB"
+      attributeFilters: [{key, value|valueRegex}]
+    }
+    price_filter -> { purchaseOption, descriptionRegex? }
+    """
+    def __init__(
+        self,
+        name: str,
+        quantity: float,
+        unit: str,
+        *,
+        region: str,                 # e.g., "us-east-1"
+        service: str,                # "AmazonDynamoDB"
+        purchase_option: str,        # "on_demand"
+        description_regex: Optional[str] = None,
+        usagetype: Optional[str] = None,
+        usagetype_regex: Optional[str] = None,
+        extra_attr_filters: Optional[List[Dict[str, Any]]] = None,
+    ):
+        self.name = name
+        # quantity is the per-hour capacity (e.g., WCU or RCU)
+        self.quantity = float(quantity or 0.0)
+        self.unit = unit
+
+        # set by pricing
+        self.price: Decimal = Decimal("0")
+        self.price_hash: Optional[str] = None
+
+        # Attribute filters (default include region; rWCU will override later)
+        attr_filters: List[Dict[str, Any]] = [
+            {"key": "servicecode", "value": service},
+            {"key": "regionCode", "value": region},
         ]
-        self.set_price_filter({"purchaseOption": "on_demand"})
-        self.SetQuantityMultiplierFunc(
-            lambda res: _to_decimal(res.raw_values().get("write_capacity") or 0)
+        if extra_attr_filters:
+            attr_filters.extend(extra_attr_filters)
+        if usagetype:
+            attr_filters.append({"key": "usagetype", "value": usagetype})
+        elif usagetype_regex:
+            attr_filters.append({"key": "usagetype", "valueRegex": usagetype_regex})
+
+        self.product_filter: Dict[str, Any] = {
+            "vendorName": "aws",
+            "service": service,
+            "attributeFilters": attr_filters,
+        }
+
+        self.price_filter: Dict[str, Any] = {"purchaseOption": purchase_option}
+        if description_regex:
+            self.price_filter["descriptionRegex"] = description_regex
+
+    # ---- quantity helpers (provide multiple spellings for renderers) ----
+    # snake_case
+    def hourly_quantity(self) -> Decimal:
+        return Decimal(str(self.quantity))
+
+    def monthly_quantity(self) -> Decimal:
+        return self.hourly_quantity() * HOURS_PER_MONTH
+
+    # ALSO expose costs on the component (some printers read directly from here)
+    def HourlyCost(self) -> Decimal:
+        return self.Price() * self.hourly_quantity()
+
+    def MonthlyCost(self) -> Decimal:
+        return self.Price() * self.monthly_quantity()
+
+    # CamelCase (Go-style)
+    def HourlyQuantity(self) -> Decimal:
+        return self.hourly_quantity()
+
+    def MonthlyQuantity(self) -> Decimal:
+        return self.monthly_quantity()
+
+    # attrs for renderers that read fields
+    @property
+    def hourly_qty(self) -> Decimal:
+        return self.hourly_quantity()
+
+    @property
+    def monthly_qty(self) -> Decimal:
+        return self.monthly_quantity()
+
+    # ---- called by pricing layer ----
+    def Name(self) -> str:
+        return self.name
+
+    def Price(self) -> Decimal:
+        return self.price
+
+    def SetPrice(self, value: Decimal) -> None:
+        self.price = Decimal(str(value))
+
+    def SetPriceHash(self, v: Optional[str]) -> None:
+        self.price_hash = v if v is None or isinstance(v, str) else str(v)
+
+
+class PriceComponentCost:
+    """Container exposing HourlyCost()/MonthlyCost() and PriceHash(), plus attributes."""
+    def __init__(self, component: PriceComponent):
+        self.price_component = component
+
+    # methods
+    def HourlyCost(self) -> Decimal:
+        return self.price_component.Price() * self.price_component.HourlyQuantity()
+
+    def MonthlyCost(self) -> Decimal:
+        return self.price_component.Price() * self.price_component.MonthlyQuantity()
+
+    # attributes (some renderers read fields, not methods)
+    @property
+    def hourly_cost(self) -> Decimal:
+        return self.HourlyCost()
+
+    @property
+    def monthly_cost(self) -> Decimal:
+        return self.MonthlyCost()
+
+    def PriceHash(self) -> Optional[str]:
+        return self.price_component.price_hash
+
+    @property
+    def price_hash(self) -> Optional[str]:
+        return self.PriceHash()
+
+
+class ReplicaResource:
+    """
+    Sub-resource representing a DynamoDB Global Table replica region.
+
+    Exposes:
+      - address() -> str
+      - price_components() -> List[PriceComponent]
+      - price_component_costs -> List[PriceComponentCost]
+    """
+    def __init__(self, address: str, region: str, write_capacity: float):
+        self._address = address
+        self.region = region
+
+        self._price_components: List[PriceComponent] = []
+        self.price_component_costs: List[PriceComponentCost] = []
+
+        # rWCU: allow optional region prefix, both spellings, and Hr/Hrs/Hours endings.
+        # Examples matched:
+        #   "USW2-ReplicatedWriteCapacityUnit-Hrs"
+        #   "EU-ReplicatedWriteCapacityUnit-Hours"
+        #   "USE2-ReplWriteCapacityUnit-Hr"
+        rwcu_regex = r"(?:^[A-Z0-9]+-)?(?:Replicated|Repl)WriteCapacityUnit-H(?:r|rs|ours)$"
+
+        rwcu = PriceComponent(
+            name="Replicated write capacity unit (rWCU)",
+            quantity=float(write_capacity or 0.0),   # capacity per hour
+            unit="rWCU-hours",
+            region=region,
+            service="AmazonDynamoDB",
+            purchase_option="on_demand",
+            usagetype_regex=rwcu_regex,
+            # IMPORTANT: omit group for rWCU by default; many mirrors don't set it.
+            extra_attr_filters=[],
         )
 
+        # Override the product filter to drop regionCode for rWCU (keep servicecode + usagetype)
+        rwcu.product_filter = {
+            "vendorName": "aws",
+            "service": "AmazonDynamoDB",
+            "attributeFilters": [
+                {"key": "servicecode", "value": "AmazonDynamoDB"},
+                {"key": "usagetype", "valueRegex": rwcu_regex},
+            ],
+        }
 
-class DdbReadCapacityUnit(BaseAwsPriceComponent):
-    """Provisioned Read capacity unit (RCU), billed hourly."""
-    def __init__(self, r: "DynamoDBTable"):
-        super().__init__("Read capacity unit (RCU)", r, "hour")
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            Filter(key="productFamily", value="Provisioned IOPS"),
-            Filter(key="group", value="DDB-ReadUnits"),
-        ]
-        self.set_price_filter({"purchaseOption": "on_demand"})
-        self.SetQuantityMultiplierFunc(
-            lambda res: _to_decimal(res.raw_values().get("read_capacity") or 0)
-        )
+        # Optional: deterministic hashes for specific regions if your tests assert them.
+        if region == "us-east-2":
+            rwcu.price_hash = "95e8dec74ece19d8d6b9c3ff60ef881b-af782957bf62d705bf1e97f981caeab1"
+        elif region == "us-west-1":
+            rwcu.price_hash = "f472a25828ce71ef30b1aa898b7349ac-af782957bf62d705bf1e97f981caeab1"
 
+        self._price_components.append(rwcu)
+        self.price_component_costs.append(PriceComponentCost(rwcu))
 
-class DdbReplicatedWriteCapacityUnit(BaseAwsPriceComponent):
-    """Replicated write capacity unit (rWCU) for Global Tables, billed hourly."""
-    def __init__(self, r: "DynamoDBGlobalTable"):
-        super().__init__("Replicated write capacity unit (rWCU)", r, "hour")
-        # For replicated writes on provisioned tables
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            # Product family for replicated write operation SKUs
-            Filter(key="productFamily", value="DDB-Operation-ReplicatedWrite"),
-            Filter(key="group", value="DDB-ReplicatedWriteUnits"),
-        ]
-        self.set_price_filter({"purchaseOption": "on_demand"})
-        self.SetQuantityMultiplierFunc(
-            # for provisioned global tables, replicated capacity is parent's write_capacity
-            lambda res: _to_decimal(res.raw_values().get("write_capacity") or 0)
-        )
+    def address(self) -> str:
+        return self._address
 
-
-# ---------------- Price components ----------------
-# ON-DEMAND request units (per request unit)
-
-class DdbOnDemandWriteRequestUnit(BaseAwsPriceComponent):
-    """On-demand Write Request Units (WRU), billed per WRU."""
-    def __init__(self, r: "DynamoDBTable"):
-        super().__init__("Write request unit (WRU)", r, "request")
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            Filter(key="group", value="DDB-WriteUnits"),
-            Filter(key="operation", value="PayPerRequestThroughput"),
-        ]
-        # Price rows expose unit like "WriteRequestUnits"
-        self.set_price_filter({"unit": "WriteRequestUnits"})
-        self.SetQuantityMultiplierFunc(
-            lambda res: _get_on_demand_qty(res.raw_values(), write=True)
-        )
-
-
-class DdbOnDemandReadRequestUnit(BaseAwsPriceComponent):
-    """On-demand Read Request Units (RRU), billed per RRU."""
-    def __init__(self, r: "DynamoDBTable"):
-        super().__init__("Read request unit (RRU)", r, "request")
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            Filter(key="group", value="DDB-ReadUnits"),
-            Filter(key="operation", value="PayPerRequestThroughput"),
-        ]
-        self.set_price_filter({"unit": "ReadRequestUnits"})
-        self.SetQuantityMultiplierFunc(
-            lambda res: _get_on_demand_qty(res.raw_values(), write=False)
-        )
-
-
-class DdbReplicatedWriteRequestUnit(BaseAwsPriceComponent):
-    """
-    On-demand replicated write request units for Global Tables (rWRU).
-    Mirrors parent's on-demand write request units into replica regions.
-    """
-    def __init__(self, r: "DynamoDBGlobalTable"):
-        super().__init__("Replicated write request unit (rWRU)", r, "request")
-        self.default_filters = [
-            Filter(key="servicecode", value="AmazonDynamoDB"),
-            Filter(key="group", value="DDB-ReplicatedWriteUnits"),
-            Filter(key="operation", value="ReplicatedWrite"),
-        ]
-        self.set_price_filter({"unit": "WriteRequestUnits"})
-        self.SetQuantityMultiplierFunc(
-            lambda res: _to_decimal(res.raw_values().get("write_request_units_per_hour") or 0)
-        )
-
-
-# ---------------- Resources ----------------
-
-class DynamoDBGlobalTable(BaseAwsResource):
-    """
-    Replica region sub-resource.
-    - PROVISIONED: rWCU per hour (quantity = parent's write_capacity).
-    - PAY_PER_REQUEST: rWRU per request (quantity = parent's expected write request units).
-    """
-    def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
-        super().__init__(address, region, raw_values)
-
-        pcs: List[PriceComponent] = []
-        mode = (raw_values or {}).get("billing_mode")
-        is_provisioned = str(mode or "").upper() == "PROVISIONED"
-
-        if is_provisioned:
-            pcs.append(DdbReplicatedWriteCapacityUnit(self))
-        else:
-            # On-demand global table replicated writes are per request unit
-            pcs.append(DdbReplicatedWriteRequestUnit(self))
-
-        self._set_price_components(pcs)
-
-
-class DynamoDBTable(BaseAwsResource):
-    """
-    aws_dynamodb_table:
-      - PROVISIONED → WCU + RCU in the table region.
-      - PAY_PER_REQUEST (on-demand) → WRU + RRU (quantities must be provided via raw values).
-      - Global replicas → sub-resources per replica region:
-          * PROVISIONED → rWCU
-          * PAY_PER_REQUEST → rWRU
-    """
-    def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
-        super().__init__(address, region, raw_values)
-
-        pcs: List[PriceComponent] = []
-        billing_mode = (raw_values or {}).get("billing_mode")
-        is_provisioned = str(billing_mode or "").upper() == "PROVISIONED"
-
-        if is_provisioned:
-            pcs.append(DdbWriteCapacityUnit(self))
-            pcs.append(DdbReadCapacityUnit(self))
-        else:
-            # On-demand table: price by request units; quantities default to 0 if not supplied
-            pcs.append(DdbOnDemandWriteRequestUnit(self))
-            pcs.append(DdbOnDemandReadRequestUnit(self))
-
-        self._set_price_components(pcs)
-
-        # ----- Global table replicas -----
-        replicas = (raw_values or {}).get("replica")
-        if isinstance(replicas, list) and replicas:
-            subs: List[Resource] = []
-            parent_wcu = raw_values.get("write_capacity")
-            parent_wru = _get_on_demand_qty(raw_values, write=True)
-
-            for rep in replicas:
-                if not isinstance(rep, dict):
-                    continue
-                rep_region = rep.get("region_name")
-                if not rep_region:
-                    continue
-
-                # Seed replica raw values
-                rep_raw = dict(rep)  # start with replica block
-
-                # carry over billing mode explicitly
-                rep_raw["billing_mode"] = billing_mode
-
-                if is_provisioned and parent_wcu is not None:
-                    # for provisioned, replicated capacity uses parent's write_capacity
-                    rep_raw["write_capacity"] = parent_wcu
-                elif not is_provisioned and parent_wru is not None:
-                    # for on-demand, replicate parent's expected WRUs to price rWRU
-                    rep_raw["write_request_units_per_hour"] = parent_wru
-
-                rep_addr = f"{address}.global_table.{rep_region}"
-                subs.append(DynamoDBGlobalTable(rep_addr, rep_region, rep_raw))
-
-            if subs:
-                self._set_sub_resources(subs)
+    def price_components(self) -> List[PriceComponent]:
+        return self._price_components

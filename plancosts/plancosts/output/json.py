@@ -1,138 +1,195 @@
-# # plancosts/output/json.py
-# from __future__ import annotations
-
-# import json
-# from decimal import Decimal, ROUND_HALF_UP
-# from typing import Any, Dict, List
-
-# from plancosts.base.costs import ResourceCostBreakdown, PriceComponentCost
-
-
-# def _round6(d: Decimal) -> Decimal:
-#     return d.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-
-
-# def _pc_cost_to_dict(pcc: PriceComponentCost) -> Dict[str, Any]:
-#     pc = pcc.price_component
-#     return {
-#         "priceComponent": pc.name(),
-#         "quantity": str(_round6(Decimal(str(pc.quantity())))),
-#         "unit": pc.unit(),
-#         "hourlyCost": str(_round6(Decimal(str(pcc.hourly_cost)))),
-#         "monthlyCost": str(_round6(Decimal(str(pcc.monthly_cost)))),
-#     }
-
-
-# def _breakdown_to_dict(b: ResourceCostBreakdown) -> Dict[str, Any]:
-#     return {
-#         "resource": b.resource.address(),
-#         "breakdown": [_pc_cost_to_dict(pc) for pc in b.price_component_costs],
-#         "subresources": [_breakdown_to_dict(s) for s in b.sub_resource_costs] or [],
-#     }
-
-
-# def to_json(resource_cost_breakdowns: List[ResourceCostBreakdown]) -> str:
-#     """
-#     Returns a JSON string matching the Go output:
-#     [
-#       {
-#         "resource": "<address>",
-#         "breakdown": [
-#           {
-#             "priceComponent": "...",
-#             "quantity": "1.000000",
-#             "unit": "hour",
-#             "hourlyCost": "0.010400",
-#             "monthlyCost": "7.592000"
-#           }
-#         ],
-#         "subresources": [ ... ]
-#       }
-#     ]
-#     """
-#     payload = [_breakdown_to_dict(b) for b in resource_cost_breakdowns]
-#     return json.dumps(payload)
-
-
 # plancosts/output/json.py
 from __future__ import annotations
 
 import json
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_EVEN
 from typing import Any, Dict, List
 
-from plancosts.base.costs import ResourceCostBreakdown, PriceComponentCost
 
+# ---- rounding helpers (match Go: Round(6) -> banker's rounding) ----
 
-def _round6(d: Decimal) -> Decimal:
-    return d.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+_D6 = Decimal("0.000001")
 
-
-def _safe_decimal(value: Any, field_name: str = "value") -> Decimal:
-    """Safely convert any value to Decimal with error handling."""
+def _to_decimal(v: Any) -> Decimal:
+    if isinstance(v, Decimal):
+        return v
     try:
-        if isinstance(value, Decimal):
-            return value
-        if value is None:
-            return Decimal("0")
-        return Decimal(str(value))
-    except Exception as e:
-        print(f"ERROR: Failed to convert {field_name} to Decimal: {repr(value)} (type: {type(value)})")
-        print(f"ERROR: Exception: {e}")
-        import traceback
-        traceback.print_exc()
-        return Decimal("0")
+        return Decimal(str(v))
+    except Exception:
+        return Decimal(0)
+
+def _round6(v: Any) -> Decimal:
+    # shopspring/decimal Round(6) uses banker's rounding; map to HALF_EVEN
+    return _to_decimal(v).quantize(_D6, rounding=ROUND_HALF_EVEN)
+
+def _num(v: Any) -> float:
+    """Convert to a JSON-safe number (float) after rounding to 6 dp."""
+    return float(_round6(v))
 
 
-def _pc_cost_to_dict(pcc: PriceComponentCost) -> Dict[str, Any]:
-    pc = pcc.price_component
-    
-    try:
-        quantity = _safe_decimal(pc.quantity(), "quantity")
-        hourly = _safe_decimal(pcc.hourly_cost, "hourlyCost")
-        monthly = _safe_decimal(pcc.monthly_cost, "monthlyCost")
-        
-        return {
-            "priceComponent": pc.name(),
-            "quantity": str(_round6(quantity)),
-            "unit": pc.unit(),
-            "hourlyCost": str(_round6(hourly)),
-            "monthlyCost": str(_round6(monthly)),
-        }
-    except Exception as e:
-        print(f"ERROR in _pc_cost_to_dict for component: {pc.name()}")
-        print(f"ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
+# ---- schema accessors (duck-typed to tolerate minor diffs) ----
+
+def _name(resource) -> str:
+    for attr in ("Name", "name"):
+        if hasattr(resource, attr):
+            val = getattr(resource, attr)
+            return val() if callable(val) else val
+    if hasattr(resource, "Address") and callable(getattr(resource, "Address")):
+        return str(resource.Address())
+    return "<resource>"
+
+def _hourly_cost(resource) -> Decimal:
+    fn = getattr(resource, "HourlyCost", None)
+    return _to_decimal(fn()) if callable(fn) else Decimal(0)
+
+def _monthly_cost(resource) -> Decimal:
+    fn = getattr(resource, "MonthlyCost", None)
+    return _to_decimal(fn()) if callable(fn) else Decimal(0)
+
+def _cost_components(resource) -> List[Any]:
+    for attr in ("CostComponents", "cost_components"):
+        v = getattr(resource, attr, None)
+        if callable(v):
+            try:
+                v = v()
+            except Exception:
+                v = None
+        if isinstance(v, list):
+            return v
+    return []
+
+def _subresources(resource) -> List[Any]:
+    for attr in ("SubResources", "sub_resources"):
+        v = getattr(resource, attr, None)
+        if callable(v):
+            try:
+                v = v()
+            except Exception:
+                v = None
+        if isinstance(v, list):
+            return v
+    return []
 
 
-def _breakdown_to_dict(b: ResourceCostBreakdown) -> Dict[str, Any]:
+# ---- cost component accessors ----
+
+def _cc_name(cc) -> str:
+    for attr in ("Name", "name"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return str(v())
+            except Exception:
+                continue
+        if isinstance(v, str):
+            return v
+    return "<component>"
+
+def _cc_unit(cc) -> str:
+    for attr in ("Unit", "unit"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return str(v())
+            except Exception:
+                continue
+        if isinstance(v, str):
+            return v
+    return ""
+
+def _cc_hourly_qty(cc) -> Decimal:
+    for attr in ("HourlyQuantity", "hourly_quantity"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return _to_decimal(v())
+            except Exception:
+                continue
+    return Decimal(0)
+
+def _cc_monthly_qty(cc) -> Decimal:
+    for attr in ("MonthlyQuantity", "monthly_quantity"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return _to_decimal(v())
+            except Exception:
+                continue
+    return Decimal(0)
+
+def _cc_price(cc) -> Decimal:
+    for attr in ("Price", "price"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return _to_decimal(v())
+            except Exception:
+                continue
+    return Decimal(0)
+
+def _cc_hourly_cost(cc) -> Decimal:
+    for attr in ("HourlyCost", "hourly_cost"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return _to_decimal(v())
+            except Exception:
+                continue
+    return Decimal(0)
+
+def _cc_monthly_cost(cc) -> Decimal:
+    for attr in ("MonthlyCost", "monthly_cost"):
+        v = getattr(cc, attr, None)
+        if callable(v):
+            try:
+                return _to_decimal(v())
+            except Exception:
+                continue
+    return Decimal(0)
+
+
+# ---- builders (mirror Go structs/tags) ----
+
+def _new_cost_component_json(cc) -> Dict[str, Any]:
     return {
-        "resource": b.resource.address(),
-        "breakdown": [_pc_cost_to_dict(pc) for pc in b.price_component_costs],
-        "subresources": [_breakdown_to_dict(s) for s in b.sub_resource_costs] or [],
+        "name":            _cc_name(cc),
+        "unit":            _cc_unit(cc),
+        "hourlyQuantity":  _num(_cc_hourly_qty(cc)),
+        "monthlyQuantity": _num(_cc_monthly_qty(cc)),
+        "price":           _num(_cc_price(cc)),
+        "hourlyCost":      _num(_cc_hourly_cost(cc)),
+        "monthlyCost":     _num(_cc_monthly_cost(cc)),
     }
 
+def _new_resource_json(resource) -> Dict[str, Any]:
+    cc_list = [_new_cost_component_json(cc) for cc in _cost_components(resource)]
+    sub_list = [_new_resource_json(sr) for sr in _subresources(resource)]
 
-def to_json(resource_cost_breakdowns: List[ResourceCostBreakdown]) -> str:
+    out: Dict[str, Any] = {
+        "name":        _name(resource),
+        "hourlyCost":  _num(_hourly_cost(resource)),
+        "monthlyCost": _num(_monthly_cost(resource)),
+    }
+    if cc_list:
+        out["costComponents"] = cc_list
+    if sub_list:
+        out["subresources"] = sub_list
+    return out
+
+
+# ---- public API ----
+
+def to_json(resources: List[Any], pretty: bool = False) -> bytes:
     """
-    Returns a JSON string matching the Go output:
-    [
-      {
-        "resource": "<address>",
-        "breakdown": [
-          {
-            "priceComponent": "...",
-            "quantity": "1.000000",
-            "unit": "hour",
-            "hourlyCost": "0.010400",
-            "monthlyCost": "7.592000"
-          }
-        ],
-        "subresources": [ ... ]
-      }
-    ]
+    Return a JSON byte string equivalent to Go's output.ToJSON.
+    - Rounds all numeric fields to 6 decimal places, banker's rounding.
+    - Omits empty arrays for costComponents/subresources (like omitempty).
     """
-    payload = [_breakdown_to_dict(b) for b in resource_cost_breakdowns]
-    return json.dumps(payload)
+    payload = [_new_resource_json(r) for r in resources]
+    if pretty:
+        return json.dumps(payload, indent=2, separators=(", ", ": ")).encode("utf-8")
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+# Optional alias to mirror Go naming at call sites, if desired.
+ToJSON = to_json

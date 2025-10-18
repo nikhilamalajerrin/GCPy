@@ -46,6 +46,7 @@ class BaseAwsPriceComponent:
 
         self._price_filter_dict: Optional[Dict[str, Any]] = None
         self._product_filter_override: Optional[Dict[str, Any]] = None
+        self._price_hash: str = ""  # traceability like Go's priceHash
 
     # ---- Go-parity-ish ----
     def AwsResource(self) -> "BaseAwsResource":
@@ -71,12 +72,24 @@ class BaseAwsPriceComponent:
     def Price(self) -> Decimal:
         return self.price_
 
-    # compatibility alias for tests (pc.price_component.price())
+    # Optional: price hash support (GraphQL returns priceHash)
+    def SetPriceHash(self, h: str) -> None:
+        self._price_hash = h or ""
+
+    def PriceHash(self) -> str:
+        return self._price_hash
+
     def price(self) -> Decimal:
         return self.Price()
 
     def HourlyCost(self) -> Decimal:
         return self.calculate_hourly_cost(self.price_)
+
+    def MonthlyCost(self) -> Decimal:
+        # Quantity() is monthly; multiply by unit price to get monthly cost
+        return (self.price_ * self.Quantity()).quantize(
+            Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+        )
 
     # ---- Quantity/Unit (for table) ----
     def Unit(self) -> str:
@@ -122,6 +135,9 @@ class BaseAwsPriceComponent:
     def hourly_cost(self) -> Decimal:
         return self.HourlyCost()
 
+    def monthly_cost(self) -> Decimal:
+        return self.MonthlyCost()
+
     def unit(self) -> str:
         return self.Unit()
 
@@ -134,7 +150,7 @@ class BaseAwsPriceComponent:
     def _synth_product_filter(self) -> Dict[str, Any]:
         """
         Build a Go-like ProductFilter and SKIP empty/None values in attributeFilters.
-        This prevents over-constraining queries like {"databaseEdition": ""}.
+        IMPORTANT: GraphQL expects camelCase "valueRegex".
         """
         if self._product_filter_override is not None:
             return dict(self._product_filter_override)
@@ -163,7 +179,7 @@ class BaseAwsPriceComponent:
                 continue
 
             if op == "REGEX":
-                attrs.append({"key": k, "valueRegex": v})
+                attrs.append({"key": k, "valueRegex": v})   # <---- camelCase for GraphQL
             else:
                 attrs.append({"key": k, "value": v})
 
@@ -175,26 +191,30 @@ class BaseAwsPriceComponent:
             "attributeFilters": attrs or None,
         }
 
+    # snake_case (used by our Python query runner)
     def product_filter(self) -> Dict[str, Any]:
         return self._synth_product_filter()
-
-    def set_product_filter_override(self, pf: Optional[Dict[str, Any]]) -> None:
-        self._product_filter_override = dict(pf) if pf else None
 
     def price_filter(self) -> Optional[Dict[str, Any]]:
         return dict(self._price_filter_dict) if isinstance(self._price_filter_dict, dict) else None
 
+    def set_product_filter_override(self, pf: Optional[Dict[str, Any]]) -> None:
+        self._product_filter_override = dict(pf) if pf else None
+
     def set_price_filter(self, pf: Optional[Dict[str, Any]]) -> None:
         self._price_filter_dict = dict(pf) if pf else None
+
+    # camelCase/Go-like aliases (in case anything calls these)
+    def ProductFilter(self) -> Dict[str, Any]:
+        return self.product_filter()
+
+    def PriceFilter(self) -> Optional[Dict[str, Any]]:
+        return self.price_filter()
 
     # ----------------------------
     #  Math helpers for wrappers
     # ----------------------------
     def calculate_hourly_cost(self, unit_price: Decimal) -> Decimal:
-        """
-        Convert a unit price (per time_unit_) to hourly and scale by quantity.
-        Only round at the end to avoid magnifying errors in monthly math.
-        """
         unit_price = _to_decimal(unit_price, Decimal(0))
         time_unit_secs = {
             "hour": Decimal(60 * 60),
@@ -208,7 +228,6 @@ class BaseAwsPriceComponent:
             month_to_hour = Decimal(1)
 
         hourly = unit_price * self.Quantity() * month_to_hour
-        # Quantize to 10 dp to match API price granularity and satisfy equality checks
         return hourly.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
 
 
@@ -223,7 +242,6 @@ class BaseAwsResource:
         self._has_cost: bool = True
         self._resource_count: int = 1
 
-    # ---- Go-parity-ish ----
     def Address(self) -> str:
         return self.address_
 
@@ -234,11 +252,9 @@ class BaseAwsResource:
         return self.raw_values_
 
     def SubResources(self) -> List["BaseAwsResource"]:
-        # Preserve insertion order to match expected test ordering
         return list(self.sub_resources_)
 
     def PriceComponents(self) -> List[BaseAwsPriceComponent]:
-        # Preserve insertion order
         return list(self.price_components_)
 
     def References(self) -> Dict[str, "BaseAwsResource"]:
@@ -256,32 +272,17 @@ class BaseAwsResource:
     def SetResourceCount(self, count: int) -> None:
         self._resource_count = int(count)
 
-    # ---- Python-friendly aliases ----
-    def address(self) -> str:
-        return self.Address()
+    # Aliases
+    def address(self) -> str: return self.Address()
+    def region(self) -> str: return self.Region()
+    def raw_values(self) -> Dict[str, Any]: return self.RawValues()
+    def sub_resources(self) -> List["BaseAwsResource"]: return self.SubResources()
+    def price_components(self) -> List[BaseAwsPriceComponent]: return self.PriceComponents()
+    def references(self) -> Dict[str, "BaseAwsResource"]: return self.References()
+    def add_reference(self, name: str, resource: "BaseAwsResource") -> None: self.AddReference(name, resource)
+    def has_cost(self) -> bool: return self.HasCost()
 
-    def region(self) -> str:
-        return self.Region()
-
-    def raw_values(self) -> Dict[str, Any]:
-        return self.RawValues()
-
-    def sub_resources(self) -> List["BaseAwsResource"]:
-        return self.SubResources()
-
-    def price_components(self) -> List[BaseAwsPriceComponent]:
-        return self.PriceComponents()
-
-    def references(self) -> Dict[str, "BaseAwsResource"]:
-        return self.References()
-
-    def add_reference(self, name: str, resource: "BaseAwsResource") -> None:
-        self.AddReference(name, resource)
-
-    def has_cost(self) -> bool:
-        return self.HasCost()
-
-    # ---- helpers for subclasses ----
+    # helpers
     def _set_sub_resources(self, subs: List["BaseAwsResource"]) -> None:
         self.sub_resources_ = subs
 
@@ -290,3 +291,30 @@ class BaseAwsResource:
 
     def _set_has_cost(self, has_cost: bool) -> None:
         self._has_cost = bool(has_cost)
+
+    # -------------------------------
+    # schema-compat (duck-typing) shim
+    # -------------------------------
+    @property
+    def cost_components(self) -> List[BaseAwsPriceComponent]:
+        """
+        Make provider resources look like schema.Resource
+        to the pricing/output pipeline.
+        """
+        return self.PriceComponents()
+
+    @property
+    def name(self) -> str:
+        """
+        Match schema.Resource.name used by the table renderer;
+        use the Terraform address for clarity (same as Go output).
+        """
+        return self.Address()
+
+    @property
+    def subresources(self) -> List["BaseAwsResource"]:
+        """
+        Some helpers/tests access `.subresources` (property),
+        not the camel or snake method names. Provide it here.
+        """
+        return self.SubResources()
