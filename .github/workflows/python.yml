@@ -8,7 +8,7 @@ on:
       - "pyproject.toml"
       - "requirements*.txt"
       - "Makefile"
-      - ".github/workflows/python.yml"p
+      - ".github/workflows/python.yml"
       - "test_plan*.json"
       - "plancosts/**"
   pull_request:
