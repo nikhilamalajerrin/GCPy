@@ -1,0 +1,17 @@
+.*
+!.env
+Dockerfile
+build/
+dist/
+.terraform/
+*tfstate*
+__pycache__/
+*.py[cod]
+*.png
+*.md
+.env.local
+.venv/
+venv/
+.poetry/
+.pytest_cache/
+examples/

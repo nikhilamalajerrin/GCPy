@@ -1,45 +1,43 @@
 # plancosts/providers/terraform/aws/elb.py
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Dict
 
-from plancosts.resource.filters import Filter, ValueMapping
+from plancosts.resource.filters import Filter
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
 
-class ElbHours(BaseAwsPriceComponent):
-    def __init__(self, resource: "Elb", is_classic: bool) -> None:
-        super().__init__(name="Hours", resource=resource, time_unit="hour")
+class _ElbClassicHours(BaseAwsPriceComponent):
+    """
+    Classic ELB hourly charge.
 
-        # Classic ELB has a single product family. For aws_lb (ALB/NLB) we
-        # select family via load_balancer_type mapping below.
-        default_family = "Load Balancer" if is_classic else "Load Balancer-Application"
-
+    Name:          "Per Classic Load Balancer"
+    Unit:          "hours"
+    Time unit:     hour   (framework will convert to monthly where needed)
+    Filters:
+      - servicecode:   AWSELB
+      - productFamily: Load Balancer
+      - usagetype:     LoadBalancerUsage
+    Quantity: 1 per hour (no usage needed)
+    """
+    def __init__(self, resource: "Elb"):
+        super().__init__(name="Per Classic Load Balancer", resource=resource, time_unit="hour")
         self.default_filters = [
             Filter(key="servicecode", value="AWSELB"),
-            Filter(key="productFamily", value=default_family),
-            Filter(key="usagetype", value="LoadBalancerUsage"),  # exact match
+            Filter(key="productFamily", value="Load Balancer"),
+            Filter(key="usagetype", value="LoadBalancerUsage"),
         ]
-
-        # For aws_lb (not classic), map load_balancer_type -> productFamily
-        #   application -> Load Balancer-Application
-        #   network     -> Load Balancer-Network
-        if not is_classic:
-            self.value_mappings = [
-                ValueMapping(
-                    from_key="load_balancer_type",
-                    to_key="productFamily",
-                    map_func=lambda v: "Load Balancer-Network"
-                    if str(v) == "network"
-                    else "Load Balancer-Application",
-                )
-            ]
-
-        # 1 unit per hour
-        self.SetQuantityMultiplierFunc(lambda _: 1)
+        self.SetQuantityMultiplierFunc(lambda _r: Decimal(1))
+        self.unit_ = "hours"
 
 
 class Elb(BaseAwsResource):
-    def __init__(self, address: str, region: str, raw_values: Dict[str, Any], is_classic: bool) -> None:
+    """
+    Python port of internal/providers/terraform/aws/elb::NewELB.
+
+    This models **Classic ELB** (aws_elb), not Application/Network Load Balancers.
+    """
+    def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
         super().__init__(address, region, raw_values)
-        self._set_price_components([ElbHours(self, is_classic)])
+        self._set_price_components([_ElbClassicHours(self)])

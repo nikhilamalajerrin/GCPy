@@ -1,187 +1,453 @@
 {
-    "format_version": "0.1",
-    "terraform_version": "0.14.0",
-    "configuration": {
-      "provider_config": {
-        "aws": {
-          "expressions": {
-            "region": { "constant_value": "us-east-1" }
-          }
-        }
-      },
-      "root_module": {
-        "resources": [
-          { "address": "aws_instance.example", "expressions": {} },
-          { "address": "aws_ebs_volume.data1", "expressions": {} },
-          {
-            "address": "aws_ebs_snapshot.snap1",
-            "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
-          },
-          {
-            "address": "aws_ebs_snapshot_copy.copy1",
-            "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
-          },
-          { "address": "aws_launch_configuration.lc1", "expressions": {} },
-          {
-            "address": "aws_autoscaling_group.asg1",
-            "expressions": { "launch_configuration": { "references": ["aws_launch_configuration.lc1"] } }
-          },
-          { "address": "aws_elb.elb1", "expressions": {} },
-          {
-            "address": "aws_lb.alb1",
-            "expressions": { "load_balancer_type": { "constant_value": "application" } }
-          },
-          { "address": "aws_db_instance.db1", "expressions": {} },
-          { "address": "aws_eip.nat1", "expressions": {} },
-          {
-            "address": "aws_nat_gateway.nat",
-            "expressions": { "allocation_id": { "references": ["aws_eip.nat1"] } }
-          }
-        ],
-        "module_calls": {
-          "web_app": {
-            "source": "./web_app",
-            "module": {
-              "resources": [
-                {
-                  "address": "aws_instance.web_app",
-                  "expressions": {
-                    "root_block_device": [ {} ],
-                    "ebs_block_device": [ {} ]
-                  }
-                }
-              ]
-            }
-          },
-          "storage": {
-            "source": "./storage",
-            "module": {
-              "resources": [
-                { "address": "aws_ebs_volume.standard", "expressions": {} },
-                {
-                  "address": "aws_ebs_snapshot.standard",
-                  "expressions": {
-                    "volume_id": { "references": ["aws_ebs_volume.standard"] }
-                  }
-                }
-              ]
-            }
-          }
+  "format_version": "0.1",
+  "terraform_version": "0.14.0",
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "expressions": {
+          "region": { "constant_value": "us-east-1" }
         }
       }
     },
-    "planned_values": {
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_instance.example",
-            "type": "aws_instance",
-            "values": {
-              "instance_type": "m5.large",
-              "tenancy": "default",
-              "root_block_device": [ {} ],
-              "ebs_block_device": [
-                { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
-                { "volume_type": "gp2", "volume_size": 200 }
-              ]
-            }
-          },
-          {
-            "address": "aws_ebs_volume.data1",
-            "type": "aws_ebs_volume",
-            "values": { "type": "io1", "size": 200, "iops": 4000 }
-          },
-          {
-            "address": "aws_ebs_snapshot.snap1",
-            "type": "aws_ebs_snapshot",
-            "values": { "volume_id": "aws_ebs_volume.data1" }
-          },
-          {
-            "address": "aws_ebs_snapshot_copy.copy1",
-            "type": "aws_ebs_snapshot_copy",
-            "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
-          },
-          {
-            "address": "aws_launch_configuration.lc1",
-            "type": "aws_launch_configuration",
-            "values": {
-              "instance_type": "m5.large",
-              "placement_tenancy": "default",
-              "root_block_device": [ {} ],
-              "block_device_mappings": [
-                {
-                  "device_name": "/dev/xvdb",
-                  "ebs": [ { "volume_type": "io1", "volume_size": 150, "iops": 3000 } ]
-                },
-                {
-                  "device_name": "/dev/xvdc",
-                  "ebs": [ { "volume_type": "gp2", "volume_size": 500 } ]
-                }
-              ]
-            }
-          },
-          {
-            "address": "aws_autoscaling_group.asg1",
-            "type": "aws_autoscaling_group",
-            "values": { "desired_capacity": 3, "launch_configuration": "aws_launch_configuration.lc1" }
-          },
-          { "address": "aws_elb.elb1", "type": "aws_elb", "values": {} },
-          { "address": "aws_lb.alb1", "type": "aws_lb", "values": { "load_balancer_type": "application" } },
-          {
-            "address": "aws_db_instance.db1",
-            "type": "aws_db_instance",
-            "values": {
-              "arn": "arn:aws:rds:us-west-2:123456789012:db:mydb",
-              "engine": "postgres",
-              "instance_class": "db.m5.large",
-              "multi_az": false,
-              "allocated_storage": 200,
-              "storage_type": "io1",
-              "iops": 3000
-            }
-          },
-          { "address": "aws_eip.nat1", "type": "aws_eip", "values": { "vpc": true } },
-          {
-            "address": "aws_nat_gateway.nat",
-            "type": "aws_nat_gateway",
-            "values": { "allocation_id": "aws_eip.nat1", "subnet_id": "subnet-123456" }
-          }
-        ],
-        "child_modules": [
-          {
-            "address": "module.web_app[\"us-east-1a\"]",
+    "root_module": {
+      "resources": [
+        { "address": "aws_instance.example", "expressions": {} },
+        { "address": "aws_ebs_volume.data1", "expressions": {} },
+        {
+          "address": "aws_ebs_snapshot.snap1",
+          "expressions": { "volume_id": { "references": ["aws_ebs_volume.data1"] } }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.copy1",
+          "expressions": { "source_snapshot_id": { "references": ["aws_ebs_snapshot.snap1"] } }
+        },
+        { "address": "aws_launch_configuration.lc1", "expressions": {} },
+        {
+          "address": "aws_autoscaling_group.asg1",
+          "expressions": { "launch_configuration": { "references": ["aws_launch_configuration.lc1"] } }
+        },
+        { "address": "aws_elb.elb1", "expressions": {} },
+        {
+          "address": "aws_lb.alb1",
+          "expressions": { "load_balancer_type": { "constant_value": "application" } }
+        },
+        { "address": "aws_db_instance.db1", "expressions": {} },
+        { "address": "aws_eip.nat1", "expressions": {} },
+        {
+          "address": "aws_nat_gateway.nat",
+          "expressions": { "allocation_id": { "references": ["aws_eip.nat1"] } }
+        },
+
+
+        { "address": "aws_alb.alb1", "expressions": { "load_balancer_type": { "constant_value": "application" } } },
+        { "address": "aws_autoscaling_group.lc1", "expressions": { "desired_capacity": { "constant_value": 2 }, "launch_configuration": { "references": ["aws_launch_configuration.lc1"] }, "max_size": { "constant_value": 2 }, "min_size": { "constant_value": 1 } } },
+        { "address": "aws_autoscaling_group.lt1", "expressions": { "desired_capacity": { "constant_value": 1 }, "launch_template": [ { "id": { "references": ["aws_launch_template.lt1"] } } ], "max_size": { "constant_value": 2 }, "min_size": { "constant_value": 0 } } },
+        { "address": "aws_autoscaling_group.mixed-instance-lt1", "expressions": { "desired_capacity": { "constant_value": 6 }, "max_size": { "constant_value": 10 }, "min_size": { "constant_value": 1 }, "mixed_instances_policy": [ { "instances_distribution": [ { "on_demand_base_capacity": { "constant_value": 1 }, "on_demand_percentage_above_base_capacity": { "constant_value": 50 } } ], "launch_template": [ { "launch_template_specification": [ { "launch_template_id": { "references": ["aws_launch_template.lt1"] } } ], "override": [ { "instance_type": { "constant_value": "t3.medium" }, "weighted_capacity": { "constant_value": "2" } }, { "instance_type": { "constant_value": "t3.large" }, "weighted_capacity": { "constant_value": "4" } } ] } ] } ] } },
+        { "address": "aws_db_instance.db_mysql", "expressions": { "allocated_storage": { "constant_value": 20 }, "engine": { "constant_value": "mysql" }, "instance_class": { "constant_value": "db.t2.micro" }, "storage_type": { "constant_value": "standard" } } },
+        { "address": "aws_db_instance.db_postgresql", "expressions": { "allocated_storage": { "constant_value": 20 }, "engine": { "constant_value": "postgres" }, "instance_class": { "constant_value": "db.t2.small" } } },
+        { "address": "aws_db_instance.db_postgresql_iops", "expressions": { "allocated_storage": { "constant_value": 20 }, "engine": { "constant_value": "postgres" }, "instance_class": { "constant_value": "db.t2.small" }, "iops": { "constant_value": 400 }, "storage_type": { "constant_value": "io1" } } },
+        { "address": "aws_db_instance.db_sqlserver", "expressions": { "allocated_storage": { "constant_value": 20 }, "engine": { "constant_value": "sqlserver-se" }, "instance_class": { "constant_value": "db.t3.xlarge" }, "multi_az": { "constant_value": true } } },
+        { "address": "aws_dynamodb_table.dynamodb-table", "expressions": { "attribute": [ { "name": { "constant_value": "UserId" }, "type": { "constant_value": "S" } }, { "name": { "constant_value": "GameTitle" }, "type": { "constant_value": "S" } } ], "billing_mode": { "constant_value": "PROVISIONED" }, "hash_key": { "constant_value": "UserId" }, "name": { "constant_value": "GameScores" }, "range_key": { "constant_value": "GameTitle" }, "read_capacity": { "constant_value": 30 }, "replica": [ { "region_name": { "constant_value": "us-east-2" } }, { "region_name": { "constant_value": "us-west-1" } } ], "write_capacity": { "constant_value": 20 } } },
+        { "address": "aws_ebs_snapshot.standard", "expressions": { "volume_id": { "references": ["aws_ebs_volume.standard"] } } },
+        { "address": "aws_ebs_snapshot_copy.standard", "expressions": { "source_region": { "references": ["data.aws_region.current"] }, "source_snapshot_id": { "references": ["aws_ebs_snapshot.standard"] } } },
+        { "address": "aws_ebs_volume.io1", "expressions": { "availability_zone": { "references": ["var.availability_zone_names"] }, "iops": { "constant_value": 500 }, "size": { "constant_value": 10 }, "type": { "constant_value": "io1" } } },
+        { "address": "aws_ebs_volume.standard", "expressions": { "availability_zone": { "references": ["var.availability_zone_names"] }, "size": { "constant_value": 15 }, "type": { "constant_value": "standard" } } },
+        { "address": "aws_ecs_cluster.ecs1", "expressions": { "capacity_providers": { "constant_value": ["FARGATE"] }, "name": { "constant_value": "ecs1" } } },
+        { "address": "aws_ecs_service.ecs_fargate1", "expressions": { "cluster": { "references": ["aws_ecs_cluster.ecs1"] }, "desired_count": { "constant_value": 2 }, "launch_type": { "constant_value": "FARGATE" }, "name": { "constant_value": "ecs_fargate1" }, "task_definition": { "references": ["aws_ecs_task_definition.ecs_task1"] } } },
+        { "address": "aws_ecs_task_definition.ecs_task1", "expressions": { "container_definitions": { "constant_value": "  [\n    {\n        \"command\": [\"sleep\", \"10\"],\n        \"entryPoint\": [\"/\"],\n        \"essential\": true,\n        \"image\": \"alpine\",\n        \"name\": \"alpine\",\n        \"network_mode\": \"none\"\n    }\n  ]\n" }, "cpu": { "constant_value": "1 vCPU" }, "family": { "constant_value": "ecs_task1" }, "inference_accelerator": [ { "device_name": { "constant_value": "device1" }, "device_type": { "constant_value": "eia2.medium" } } ], "memory": { "constant_value": "2 GB" }, "requires_compatibilities": { "constant_value": ["FARGATE"] } } },
+        { "address": "aws_launch_template.lt1", "expressions": { "block_device_mappings": [ { "device_name": { "constant_value": "xvdf" }, "ebs": [ { "volume_size": { "constant_value": 10 } } ] }, { "device_name": { "constant_value": "xvfa" }, "ebs": [ { "iops": { "constant_value": 200 }, "volume_size": { "constant_value": 20 }, "volume_type": { "constant_value": "io1" } } ] } ], "image_id": { "references": ["var.aws_ami_id"] }, "instance_type": { "constant_value": "t3.small" } } },
+        { "address": "aws_lb.nlb1", "expressions": { "load_balancer_type": { "constant_value": "network" } } },
+
+
+        { "address": "aws_dynamodb_table.provisioned_tbl", "expressions": { "billing_mode": { "constant_value": "PROVISIONED" }, "read_capacity": { "constant_value": 100 }, "write_capacity": { "constant_value": 50 }, "replica": [ { "region_name": { "constant_value": "us-west-2" } }, { "region_name": { "constant_value": "eu-west-1" } } ] } },
+        { "address": "aws_dynamodb_table.on_demand_tbl", "expressions": { "billing_mode": { "constant_value": "PAY_PER_REQUEST" } } }
+      ],
+      "module_calls": {
+        "web_app": {
+          "source": "./web_app",
+          "module": {
             "resources": [
               {
                 "address": "aws_instance.web_app",
-                "type": "aws_instance",
-                "values": {
-                  "instance_type": "t3.micro",
-                  "tenancy": "default",
+                "expressions": {
                   "root_block_device": [ {} ],
-                  "ebs_block_device": [
-                    { "volume_type": "gp2", "volume_size": 15 }
-                  ]
+                  "ebs_block_device": [ {} ]
                 }
               }
             ]
-          },
-          {
-            "address": "module.storage[0]",
+          }
+        },
+        "storage": {
+          "source": "./storage",
+          "module": {
             "resources": [
-              {
-                "address": "aws_ebs_volume.standard",
-                "type": "aws_ebs_volume",
-                "values": { "type": "standard", "size": 30 }
-              },
+              { "address": "aws_ebs_volume.standard", "expressions": {} },
               {
                 "address": "aws_ebs_snapshot.standard",
-                "type": "aws_ebs_snapshot",
-                "values": { "volume_id": "aws_ebs_volume.standard" }
+                "expressions": {
+                  "volume_id": { "references": ["aws_ebs_volume.standard"] }
+                }
               }
             ]
           }
-        ]
+        }
       }
     }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_instance.example",
+          "type": "aws_instance",
+          "values": {
+            "instance_type": "m5.large",
+            "tenancy": "default",
+            "root_block_device": [ {} ],
+            "ebs_block_device": [
+              { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
+              { "volume_type": "gp2", "volume_size": 200 }
+            ]
+          }
+        },
+        {
+          "address": "aws_ebs_volume.data1",
+          "type": "aws_ebs_volume",
+          "values": { "type": "io1", "size": 200, "iops": 4000 }
+        },
+        {
+          "address": "aws_ebs_snapshot.snap1",
+          "type": "aws_ebs_snapshot",
+          "values": { "volume_id": "aws_ebs_volume.data1" }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.copy1",
+          "type": "aws_ebs_snapshot_copy",
+          "values": { "source_snapshot_id": "aws_ebs_snapshot.snap1" }
+        },
+        {
+          "address": "aws_launch_configuration.lc1",
+          "type": "aws_launch_configuration",
+          "values": {
+            "instance_type": "m5.large",
+            "placement_tenancy": "default",
+            "root_block_device": [ {} ],
+            "block_device_mappings": [
+              {
+                "device_name": "/dev/xvdb",
+                "ebs": [ { "volume_type": "io1", "volume_size": 150, "iops": 3000 } ]
+              },
+              {
+                "device_name": "/dev/xvdc",
+                "ebs": [ { "volume_type": "gp2", "volume_size": 500 } ]
+              }
+            ]
+          }
+        },
+        {
+          "address": "aws_autoscaling_group.asg1",
+          "type": "aws_autoscaling_group",
+          "values": { "desired_capacity": 3, "launch_configuration": "aws_launch_configuration.lc1" }
+        },
+        { "address": "aws_elb.elb1", "type": "aws_elb", "values": {} },
+        { "address": "aws_lb.alb1", "type": "aws_lb", "values": { "load_balancer_type": "application" } },
+        {
+          "address": "aws_db_instance.db1",
+          "type": "aws_db_instance",
+          "values": {
+            "arn": "arn:aws:rds:us-west-2:123456789012:db:mydb",
+            "engine": "postgres",
+            "instance_class": "db.m5.large",
+            "multi_az": false,
+            "allocated_storage": 200,
+            "storage_type": "io1",
+            "iops": 3000
+          }
+        },
+        { "address": "aws_eip.nat1", "type": "aws_eip", "values": { "vpc": true } },
+        {
+          "address": "aws_nat_gateway.nat",
+          "type": "aws_nat_gateway",
+          "values": { "allocation_id": "aws_eip.nat1", "subnet_id": "subnet-123456" }
+        },
+
+      
+        {
+          "address": "aws_alb.alb1",
+          "type": "aws_alb",
+          "values": {
+            "access_logs": [],
+            "drop_invalid_header_fields": false,
+            "enable_deletion_protection": false,
+            "enable_http2": true,
+            "idle_timeout": 60,
+            "load_balancer_type": "application",
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_autoscaling_group.lc1",
+          "type": "aws_autoscaling_group",
+          "values": {
+            "desired_capacity": 2,
+            "force_delete": false,
+            "health_check_grace_period": 300,
+            "max_size": 2,
+            "metrics_granularity": "1Minute",
+            "min_size": 1,
+            "wait_for_capacity_timeout": "10m",
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_autoscaling_group.lt1",
+          "type": "aws_autoscaling_group",
+          "values": {
+            "desired_capacity": 1,
+            "max_size": 2,
+            "min_size": 0,
+            "wait_for_capacity_timeout": "10m",
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_autoscaling_group.mixed-instance-lt1",
+          "type": "aws_autoscaling_group",
+          "values": {
+            "desired_capacity": 6,
+            "max_size": 10,
+            "min_size": 1,
+            "mixed_instances_policy": [
+              {
+                "instances_distribution": [
+                  {
+                    "on_demand_base_capacity": 1,
+                    "on_demand_percentage_above_base_capacity": 50,
+                    "spot_max_price": null
+                  }
+                ],
+                "launch_template": [
+                  {
+                    "launch_template_specification": [ { "version": "$Default" } ],
+                    "override": [
+                      { "instance_type": "t3.medium", "weighted_capacity": "2" },
+                      { "instance_type": "t3.large", "weighted_capacity": "4" }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_db_instance.db_mysql",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "auto_minor_version_upgrade": true,
+            "delete_automated_backups": true,
+            "engine": "mysql",
+            "instance_class": "db.t2.micro",
+            "monitoring_interval": 0,
+            "publicly_accessible": false,
+            "storage_type": "standard",
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_db_instance.db_postgresql",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "auto_minor_version_upgrade": true,
+            "delete_automated_backups": true,
+            "engine": "postgres",
+            "instance_class": "db.t2.small",
+            "monitoring_interval": 0,
+            "publicly_accessible": false,
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_db_instance.db_postgresql_iops",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "auto_minor_version_upgrade": true,
+            "delete_automated_backups": true,
+            "engine": "postgres",
+            "instance_class": "db.t2.small",
+            "monitoring_interval": 0,
+            "publicly_accessible": false,
+            "storage_type": "io1",
+            "iops": 400,
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_db_instance.db_sqlserver",
+          "type": "aws_db_instance",
+          "values": {
+            "allocated_storage": 20,
+            "auto_minor_version_upgrade": true,
+            "delete_automated_backups": true,
+            "engine": "sqlserver-se",
+            "instance_class": "db.t3.xlarge",
+            "monitoring_interval": 0,
+            "multi_az": true,
+            "publicly_accessible": false,
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_dynamodb_table.dynamodb-table",
+          "type": "aws_dynamodb_table",
+          "values": {
+            "billing_mode": "PROVISIONED",
+            "attribute": [
+              { "name": "GameTitle", "type": "S" },
+              { "name": "UserId", "type": "S" }
+            ],
+            "hash_key": "UserId",
+            "name": "GameScores",
+            "range_key": "GameTitle",
+            "read_capacity": 30,
+            "replica": [
+              { "region_name": "us-east-2" },
+              { "region_name": "us-west-1" }
+            ],
+            "tags": null,
+            "write_capacity": 20
+          }
+        },
+        {
+          "address": "aws_ebs_snapshot.standard",
+          "type": "aws_ebs_snapshot",
+          "values": { "description": null, "tags": null }
+        },
+        {
+          "address": "aws_ebs_snapshot_copy.standard",
+          "type": "aws_ebs_snapshot_copy",
+          "values": { "description": null, "encrypted": null, "kms_key_id": null, "source_region": "us-east-1", "tags": null }
+        },
+        {
+          "address": "aws_ebs_volume.io1",
+          "type": "aws_ebs_volume",
+          "values": { "availability_zone": "us-east-1a", "iops": 500, "size": 10, "tags": null, "type": "io1" }
+        },
+        {
+          "address": "aws_ebs_volume.standard",
+          "type": "aws_ebs_volume",
+          "values": { "availability_zone": "us-east-1a", "size": 15, "tags": null, "type": "standard" }
+        },
+        {
+          "address": "aws_ecs_cluster.ecs1",
+          "type": "aws_ecs_cluster",
+          "values": {
+            "capacity_providers": [ "FARGATE" ],
+            "default_capacity_provider_strategy": [],
+            "name": "ecs1",
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_ecs_service.ecs_fargate1",
+          "type": "aws_ecs_service",
+          "values": {
+            "capacity_provider_strategy": [],
+            "deployment_controller": [],
+            "deployment_maximum_percent": 200,
+            "deployment_minimum_healthy_percent": 100,
+            "desired_count": 2,
+            "enable_ecs_managed_tags": false,
+            "health_check_grace_period_seconds": null,
+            "launch_type": "FARGATE",
+            "load_balancer": [],
+            "name": "ecs_fargate1",
+            "network_configuration": [],
+            "ordered_placement_strategy": [],
+            "placement_constraints": [],
+            "propagate_tags": null,
+            "scheduling_strategy": "REPLICA",
+            "service_registries": [],
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_ecs_task_definition.ecs_task1",
+          "type": "aws_ecs_task_definition",
+          "values": {
+            "container_definitions": "[{\"command\":[\"sleep\",\"10\"],\"entryPoint\":[\"/\"],\"essential\":true,\"image\":\"alpine\",\"name\":\"alpine\"}]",
+            "cpu": "1 vCPU",
+            "family": "ecs_task1",
+            "inference_accelerator": [ { "device_name": "device1", "device_type": "eia2.medium" } ],
+            "memory": "2 GB",
+            "requires_compatibilities": [ "FARGATE" ],
+            "tags": null,
+            "volume": []
+          }
+        },
+        { "address": "aws_lb.nlb1", "type": "aws_lb", "values": { "enable_cross_zone_load_balancing": false, "enable_deletion_protection": false, "load_balancer_type": "network", "tags": null } },
+
+        
+        {
+          "address": "aws_dynamodb_table.provisioned_tbl",
+          "type": "aws_dynamodb_table",
+          "values": {
+            "billing_mode": "PROVISIONED",
+            "read_capacity": 100,
+            "write_capacity": 50,
+            "replica": [
+              { "region_name": "us-west-2" },
+              { "region_name": "eu-west-1" }
+            ],
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_dynamodb_table.on_demand_tbl",
+          "type": "aws_dynamodb_table",
+          "values": {
+            "billing_mode": "PAY_PER_REQUEST",
+            "tags": null
+          }
+        }
+      ],
+      "child_modules": [
+        {
+          "address": "module.web_app[\"us-east-1a\"]",
+          "resources": [
+            {
+              "address": "aws_instance.web_app",
+              "type": "aws_instance",
+              "values": {
+                "instance_type": "t3.micro",
+                "tenancy": "default",
+                "root_block_device": [ {} ],
+                "ebs_block_device": [
+                  { "volume_type": "gp2", "volume_size": 15 }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "address": "module.storage[0]",
+          "resources": [
+            {
+              "address": "aws_ebs_volume.standard",
+              "type": "aws_ebs_volume",
+              "values": { "type": "standard", "size": 30 }
+            },
+            {
+              "address": "aws_ebs_snapshot.standard",
+              "type": "aws_ebs_snapshot",
+              "values": { "volume_id": "aws_ebs_volume.standard" }
+            }
+          ]
+        }
+      ]
+    }
   }
-  
+}

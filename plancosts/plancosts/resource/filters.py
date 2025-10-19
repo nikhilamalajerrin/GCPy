@@ -9,8 +9,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 class Filter:
     key: str
     value: str
-    # Go has `omitempty`; match that by defaulting to empty string and
-    # only serializing it when non-empty in the GraphQL builder.
     operation: str = ""
 
 
@@ -24,19 +22,18 @@ class ValueMapping:
         if self.map_func is not None:
             v = self.map_func(from_val)
             return "" if v is None else str(v)
-        # Go returns "" if fromVal is nil
+
         if from_val is None:
             return ""
         return str(from_val)
 
-    # Back-compat for any CamelCase calls used elsewhere
     def MappedValue(self, from_val: Any) -> str:  # noqa: N802
         return self.mapped_value(from_val)
 
 
 def merge_filters(*lists: Iterable[Filter]) -> List[Filter]:
     """
-    Go merges by key with 'last write wins'. Keep stable order of first sighting.
+    key with 'last write wins'. Keep stable order of first sighting.
     """
     order: List[str] = []
     latest: Dict[str, Filter] = {}
@@ -52,10 +49,10 @@ def map_filters(
     value_mappings: Iterable[ValueMapping], values: Dict[str, Any]
 ) -> List[Filter]:
     """
-    Go’s MapFilters iterates value map -> mappings and only adds when mapped value != "".
+    MapFilters iterates value map -> mappings and only adds when mapped value != "".
     """
     out: List[Filter] = []
-    # Follow Go intent; iterating mappings is fine as long as we enforce skip-on-empty.
+
     for vm in value_mappings:
         if vm.from_key in values:
             to_val = vm.mapped_value(values[vm.from_key])

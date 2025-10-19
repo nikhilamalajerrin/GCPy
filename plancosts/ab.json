@@ -1,0 +1,96 @@
+{
+  "format_version": "0.1",
+  "terraform_version": "0.14.0",
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "expressions": {
+          "region": { "constant_value": "us-east-1" }
+        }
+      }
+    },
+    "root_module": {
+      "resources": [
+        { "address": "aws_instance.example", "expressions": {} },
+        { "address": "aws_instance.minimal", "expressions": {} },
+        {
+          "address": "aws_nat_gateway.nat",
+          "expressions": {
+            "allocation_id": { "constant_value": "eipalloc-1234567890abcdef0" },
+            "subnet_id": { "constant_value": "subnet-123456" }
+          }
+        },
+        {
+          "address": "aws_ecs_task_definition.td",
+          "expressions": {
+            "cpu":    { "constant_value": "512" },
+            "memory": { "constant_value": "1024" }
+          }
+        },
+        {
+          "address": "aws_ecs_service.svc",
+          "expressions": {
+            "launch_type":    { "constant_value": "FARGATE" },
+            "desired_count":  { "constant_value": 2 },
+            "task_definition": {
+              "references": ["aws_ecs_task_definition.td"]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_instance.example",
+          "type": "aws_instance",
+          "values": {
+            "instance_type": "m5.large",
+            "tenancy": "default",
+            "root_block_device": [
+              { "volume_type": "gp2", "volume_size": 100 }
+            ],
+            "ebs_block_device": [
+              { "volume_type": "io1", "volume_size": 50, "iops": 3000 },
+              { "volume_type": "gp2", "volume_size": 200 }
+            ]
+          }
+        },
+        {
+          "address": "aws_instance.minimal",
+          "type": "aws_instance",
+          "values": {
+            "instance_type": "t3.micro",
+            "tenancy": "default"
+          }
+        },
+        {
+          "address": "aws_nat_gateway.nat",
+          "type": "aws_nat_gateway",
+          "values": {
+            "allocation_id": "eipalloc-1234567890abcdef0",
+            "subnet_id": "subnet-123456"
+          }
+        },
+        {
+          "address": "aws_ecs_task_definition.td",
+          "type": "aws_ecs_task_definition",
+          "values": {
+            "cpu": "512",
+            "memory": "1024"
+          }
+        },
+        {
+          "address": "aws_ecs_service.svc",
+          "type": "aws_ecs_service",
+          "values": {
+            "launch_type": "FARGATE",
+            "desired_count": 2
+          }
+        }
+      ]
+    }
+  }
+}
