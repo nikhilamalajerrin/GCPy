@@ -1,6 +1,6 @@
 # GCPy / plancosts
 
-Lightweight Python-based cost estimation for Terraform plans. This tool provides a CLI to estimate costs from Terraform plan JSON files or directories, using a mock pricing API for local development and CI.
+Lightweight Python-based cost estimation for Terraform plans. This tool provides a CLI to estimate costs from Terraform plan JSON files or directories, using a mock pricing API for local development and CI..
 
 ## Table of Contents
 - [Features](#features)
