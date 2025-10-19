@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
-__all__ = ["JSONResult", "ResourceData"]
+__all__ = ["JSONResult", "ResourceData", "AddRawValue"]
 
 
 # --- Minimal gjson-like result wrapper -----------------
@@ -190,6 +190,16 @@ class ResourceData:
     def Get(self, key: str) -> JSONResult:
         return JSONResult(self._raw_values).Get(key)
 
+    def Set(self, key: str, value: Any) -> None:
+        """
+        Mirror Go's (*ResourceData).Set: ensure the raw-values map exists,
+        then write the key/value.
+        """
+        # Ensure dict exists (prevents 'nil map' style issues)
+        if not isinstance(self._raw_values, dict):
+            self._raw_values = {}
+        self._raw_values[key] = value
+
     def References(self, key: str) -> List["ResourceData"]:
         return self._references_map.get(key, [])
 
@@ -202,3 +212,22 @@ class ResourceData:
 
     def references_map(self) -> Dict[str, List["ResourceData"]]:
         return self._references_map
+
+
+# --- AddRawValue ------------
+
+def AddRawValue(rawValues: JSONResult, key: str, value: Any) -> JSONResult:
+    """
+    Mirrors Go's AddRawValue: when rawValues is empty or not an object,
+    initialize a map first, then set key/value and return a new JSONResult.
+
+    This prevents 'nil map entry' style crashes when Terraform JSON 'values'
+    is empty/null.
+    """
+    base = rawValues.Value() if isinstance(rawValues, JSONResult) else rawValues
+    if not isinstance(base, dict):
+        base = {}
+    # copy-on-write
+    out = dict(base)
+    out[key] = value
+    return JSONResult(out)

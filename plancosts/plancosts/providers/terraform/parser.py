@@ -1,3 +1,4 @@
+# plancosts/providers/terraform/parser.py
 from __future__ import annotations
 
 import json
@@ -8,20 +9,32 @@ from .cmd import load_plan_json as _load_plan_json
 from .address import strip_address_array
 from plancosts.schema.resource_data import ResourceData
 
-# ---------------- Optional centralized registry ----------------
-_AWS_REGISTRY: Optional[Dict[str, Any]] = None
-try:
-    from .aws.resource_registry import ResourceRegistry as _AWS_REGISTRY  # type: ignore
-except Exception:
-    _AWS_REGISTRY = None
-
 __all__ = ["parse_plan_json", "parse_plan_file"]
 
 _INFRACOST_PROVIDER_NAMES = ("infracost", "infracost.io/infracost/infracost")
 
 
-# ---------------- Tiny wrappers to normalize callable/dict fields ----------------
+# ---------------- Optional centralized registry ----------------
+_AWS_REGISTRY: Optional[Dict[str, Any]] = None
+try:
+    # Support multiple shapes of registry modules:
+    # - dict at ResourceRegistry / REGISTRY / mapping
+    # - callable ResourceRegistry() returning a dict
+    from .aws import resource_registry as _rr  # type: ignore
 
+    if isinstance(getattr(_rr, "ResourceRegistry", None), dict):
+        _AWS_REGISTRY = getattr(_rr, "ResourceRegistry")  # a dict mapping
+    elif callable(getattr(_rr, "ResourceRegistry", None)):
+        _AWS_REGISTRY = _rr.ResourceRegistry()  # a factory returning a dict
+    elif isinstance(getattr(_rr, "REGISTRY", None), dict):
+        _AWS_REGISTRY = getattr(_rr, "REGISTRY")
+    elif isinstance(getattr(_rr, "mapping", None), dict):
+        _AWS_REGISTRY = getattr(_rr, "mapping")
+except Exception:
+    _AWS_REGISTRY = None
+
+
+# ---------------- Tiny wrappers to normalize callable/dict fields ----------------
 class _CallableDict:
     """
     Wrap a dict so it is ALSO callable (returns the dict).
@@ -76,7 +89,6 @@ class _CallableFuncProxy:
 
 
 # ---------------- Region helpers ----------------
-
 def _provider_region(plan_obj: Dict[str, Any]) -> str:
     return (
         plan_obj.get("configuration", {})
@@ -89,14 +101,34 @@ def _provider_region(plan_obj: Dict[str, Any]) -> str:
 
 
 # ---------------- Address helpers ----------------
-
 def _address_resource_part(address: str) -> str:
+    """
+    Mirrors Go:
+      - if the 3rd part from the end is 'data', use the last 3 parts
+      - else use the last 2 parts
+    """
     parts = address.split(".")
-    return ".".join(parts[-2:])
+    if len(parts) >= 3 and parts[-3] == "data":
+        resource_parts = parts[-3:]
+    else:
+        resource_parts = parts[-2:]
+    return ".".join(resource_parts)
+
 
 def _address_module_part(address: str) -> str:
+    """
+    Mirrors Go:
+      - if the 3rd part from the end is 'data', trim 3 parts
+      - else trim 2 parts
+    (We return WITHOUT a trailing dot; we add it when composing.)
+    """
     parts = address.split(".")
-    return ".".join(parts[:-2])
+    if len(parts) >= 3 and parts[-3] == "data":
+        module_parts = parts[:-3]
+    else:
+        module_parts = parts[:-2]
+    return ".".join(module_parts)
+
 
 def _address_module_names(address: str) -> List[str]:
     m = re.findall(r"module\.([^\[]*)", _address_module_part(address))
@@ -104,12 +136,12 @@ def _address_module_names(address: str) -> List[str]:
 
 
 # ---------------- Config JSON helpers ----------------
-
 def _get_configuration_json_for_module_path(configurationJSON: Dict[str, Any], module_names: List[str]) -> Dict[str, Any]:
     node: Dict[str, Any] = configurationJSON
     for name in module_names:
         node = (node.get("module_calls") or {}).get(name, {}).get("module", {}) or {}
     return node
+
 
 def _get_configuration_json_for_resource_address(configurationJSON: Dict[str, Any], address: str) -> Dict[str, Any]:
     module_names = _address_module_names(address)
@@ -123,11 +155,11 @@ def _get_configuration_json_for_resource_address(configurationJSON: Dict[str, An
 
 
 # ---------------- Plan parsing ----------------
-
 def _add_raw_value(raw_values: Dict[str, Any], key: str, value: Any) -> Dict[str, Any]:
     out = dict(raw_values or {})
     out[key] = value
     return out
+
 
 def _parse_resource_data(plan: Dict[str, Any]) -> Dict[str, ResourceData]:
     provider_config = plan.get("configuration", {}).get("provider_config", {}) or {}
@@ -193,7 +225,6 @@ def _parse_resource_data(plan: Dict[str, Any]) -> Dict[str, ResourceData]:
 
 
 # ---------------- Reference wiring ----------------
-
 def _get_reference_addresses(attribute: str, attributeJSON: Any, ref_map: Dict[str, List[str]]) -> None:
     if isinstance(attributeJSON, dict) and isinstance(attributeJSON.get("references"), list):
         for ref in attributeJSON["references"]:
@@ -206,6 +237,7 @@ def _get_reference_addresses(attribute: str, attributeJSON: Any, ref_map: Dict[s
     if isinstance(attributeJSON, dict):
         for k, v in attributeJSON.items():
             _get_reference_addresses(f"{attribute}.{k}", v, ref_map)
+
 
 def _parse_references(resource_data_map: Dict[str, ResourceData], configurationJSON: Dict[str, Any]) -> None:
     for address, rd in resource_data_map.items():
@@ -225,6 +257,8 @@ def _parse_references(resource_data_map: Dict[str, ResourceData], configurationJ
         module_part = _address_module_part(address)
         for attr, refs in ref_map.items():
             for ref_addr in refs:
+                # Go: fullRefAddress := fmt.Sprintf("%s%s", addressModulePart(address), refAddress)
+                # Our module_part has no trailing dot; add one if non-empty.
                 full_ref = f"{module_part}.{ref_addr}" if module_part else ref_addr
                 target = resource_data_map.get(full_ref)
                 if target is not None:
@@ -232,10 +266,10 @@ def _parse_references(resource_data_map: Dict[str, ResourceData], configurationJ
 
 
 # ---------------- Usage resources ----------------
-
 def _is_infracost_resource(rd: ResourceData) -> bool:
     prov = getattr(rd, "ProviderName", "") or getattr(rd, "provider_name", "")
     return prov in _INFRACOST_PROVIDER_NAMES
+
 
 def _build_usage_resource_data_map(resource_data_map: Dict[str, ResourceData]) -> Dict[str, ResourceData]:
     usage_map: Dict[str, ResourceData] = {}
@@ -245,12 +279,12 @@ def _build_usage_resource_data_map(resource_data_map: Dict[str, ResourceData]) -
                 usage_map[ref.Address] = rd
     return usage_map
 
+
 def _strip_infracost_resources(resource_data_map: Dict[str, ResourceData]) -> Dict[str, ResourceData]:
     return {addr: rd for addr, rd in resource_data_map.items() if not _is_infracost_resource(rd)}
 
 
 # ---------------- Constructors & factory ----------------
-
 def _build_fallback_constructors() -> Dict[str, Any]:
     from .aws.instance import AwsInstance  # type: ignore
     from .aws.nat_gateway import NatGateway  # type: ignore
@@ -301,7 +335,9 @@ def _build_fallback_constructors() -> Dict[str, Any]:
         m["aws_ecs_service"] = _EcsCtor
     return m
 
-_RESOURCE_CONSTRUCTORS: Dict[str, Any] = dict(_AWS_REGISTRY or _build_fallback_constructors())
+
+_RESOURCE_CONSTRUCTORS: Dict[str, Any] = _AWS_REGISTRY or _build_fallback_constructors()
+
 
 def _create_resource_from_rd(
     rd: ResourceData,
@@ -347,7 +383,6 @@ def _create_resource_from_rd(
 
 
 # ---------------- Top-level parse ----------------
-
 def parse_plan_json(plan_json: bytes | str | Dict[str, Any]) -> List[Any]:
     if isinstance(plan_json, (bytes, bytearray)):
         plan = json.loads(plan_json.decode("utf-8"))
