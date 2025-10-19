@@ -8,5 +8,10 @@ setup(
     include_package_data=True,
     package_data={"plancosts": ["tests/*.json", "*.json"]},
     install_requires=["click", "requests"],
-    entry_points={"console_scripts": ["plancosts=main:main"]},
+    entry_points={
+        "console_scripts": [
+            "plancosts=plancosts.main:main",   # <-- fix this line
+        ]
+    },
+
 )

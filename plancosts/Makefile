@@ -1,6 +1,7 @@
-# ---- Basic config ----
-PY        := python
-PIP       := pip
+# ----------------------------- Python (plancosts) -----------------------------
+
+PY        ?= python
+PIP       ?= pip
 PACKAGE   := plancosts
 ENTRY     := main.py
 
@@ -10,20 +11,21 @@ ARGS ?=
 # Dev tools
 DEV_PKGS  := black isort ruff mypy pytest build wheel
 
-.PHONY: deps run build clean test fmt lint typecheck check release help
+.PHONY: help deps run build clean test fmt lint typecheck check release
 .DEFAULT_GOAL := help
 
 help:
-	@echo "make deps        - install dev dependencies"
-	@echo "make run ARGS=…  - run main.py with ARGS (e.g. --tfjson test.json -o table)"
-	@echo "make build       - build sdist+wheel into dist/"
-	@echo "make release     - package artifacts from dist/ into release/ tarball(s)"
-	@echo "make clean       - remove build artifacts"
-	@echo "make test        - run pytest"
-	@echo "make fmt         - run black + isort"
-	@echo "make lint        - run ruff"
-	@echo "make typecheck   - run mypy"
-	@echo "make check       - fmt + lint + typecheck + tests"
+	@echo "Python targets:"
+	@echo "  make deps        - install dev dependencies"
+	@echo "  make run ARGS=…  - run main.py with ARGS (e.g. --tfjson test.json -o table)"
+	@echo "  make build       - build sdist+wheel into dist/"
+	@echo "  make release     - tar dist/* into release/ with versioned names"
+	@echo "  make clean       - remove build artifacts"
+	@echo "  make test        - run pytest"
+	@echo "  make fmt         - run black + isort"
+	@echo "  make lint        - run ruff"
+	@echo "  make typecheck   - run mypy (non-fatal)"
+	@echo "  make check       - fmt + lint + typecheck + tests"
 
 deps:
 	$(PIP) install -U pip
@@ -58,9 +60,7 @@ typecheck:
 
 check: fmt lint typecheck test
 
-# -------- Release (Infracost-style packing) --------
-# Creates tarballs under release/ from dist/ artifacts.
-# Names include detected version (or 'dev' fallback).
+# -------- Release: package dist/* into release/ with version in name --------
 release: build
 	@mkdir -p release
 	@V="`$(PY) - <<'PY'\ntry:\n import importlib\n m=importlib.import_module('$(PACKAGE)'); print(getattr(m,'__version__',''))\nexcept Exception:\n print('')\nPY`"; \
@@ -68,9 +68,9 @@ release: build
 	echo "Packaging $(PACKAGE) version: $$V"; \
 	for a in dist/*; do \
 	  bn=$$(basename "$$a"); \
-	  tarname="release/$(PACKAGE)-$${V}-$${bn}.tar.gz"; \
-	  echo "  -> $$tarname"; \
-	  tar -czf "$$tarname" -C dist "$$bn"; \
-	  shasum -a 256 "$$tarname" > "$$tarname.sha256" 2>/dev/null || sha256sum "$$tarname" > "$$tarname.sha256"; \
+	  tarname=\"release/$(PACKAGE)-$${V}-$${bn}.tar.gz\"; \
+	  echo \"  -> $$tarname\"; \
+	  tar -czf \"$$tarname\" -C dist \"$$bn\"; \
+	  (shasum -a 256 \"$$tarname\" 2>/dev/null || sha256sum \"$$tarname\") > \"$$tarname.sha256\"; \
 	done
 	@ls -lh release/

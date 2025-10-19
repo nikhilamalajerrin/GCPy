@@ -1,7 +1,9 @@
+# plancosts/prices/query.py
 from __future__ import annotations
 
 import json
 import logging
+import os
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Tuple
@@ -11,6 +13,44 @@ from urllib.request import Request, urlopen
 from plancosts.config import PRICE_LIST_API_ENDPOINT
 
 GraphQLQuery = Dict[str, Any]
+
+
+# ---------- headers: User-Agent + API key ----------
+def _plancosts_env() -> str:
+    v = (os.getenv("PLANCOSTS_ENV") or os.getenv("INFRACOST_ENV") or "").strip().lower()
+    if v in ("test", "dev"):
+        return v
+    # Heuristic for tests (roughly mirrors Go's .test suffix check)
+    try:
+        exe = os.path.basename(os.getenv("_", ""))
+        if exe.endswith(".test"):
+            return "test"
+    except Exception:
+        pass
+    return ""
+
+
+def _plancosts_user_agent() -> str:
+    base = "plancosts"
+    try:
+        # Try to read package version for UA stamping
+        import importlib
+
+        m = importlib.import_module("plancosts")
+        ver = getattr(m, "__version__", "") or ""
+    except Exception:
+        ver = ""
+    if ver:
+        base = f"{base}-{ver}"
+    env = _plancosts_env()
+    if env:
+        base = f"{base} ({env})"
+    return base
+
+
+def _plancosts_api_key() -> str:
+    # Supports both env names
+    return os.getenv("PLANCOSTS_API_KEY") or os.getenv("SELF_HOSTED_INFRACOST_API_KEY") or ""
 
 
 def _prefer_nonzero_first(payload: Any) -> Any:
@@ -128,7 +168,6 @@ def _pop_marketoption_to_purchaseoption(vars_obj: dict) -> dict:
     return vars_new
 
 
-
 def _normalize_filters(product_filter: Any, price_filter: Any) -> tuple[dict, dict]:
     """
     Normalize product- and price-level filters for the GraphQL endpoint.
@@ -157,7 +196,7 @@ def _normalize_filters(product_filter: Any, price_filter: Any) -> tuple[dict, di
     # If product filter explicitly requests Spot, ensure price-level purchaseOption='spot'
     # (This makes Spot EC2 work while leaving EBS & On-Demand untouched.)
     if _product_has_marketoption_spot(pf) and "purchaseOption" not in prf:
-        prf["purchaseOption"] = "Spot"
+        prf["purchaseOption"] = "spot"
 
     return pf, prf
 
@@ -197,12 +236,14 @@ class GraphQLQueryRunner:
 
     def _post(self, payload: Any) -> Any:
         body = json.dumps(payload).encode("utf-8")
-        req = Request(
-            self.endpoint,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": _plancosts_user_agent(),
+        }
+        api_key = _plancosts_api_key()
+        if api_key:
+            headers["X-Api-Key"] = api_key
+        req = Request(self.endpoint, data=body, headers=headers, method="POST")
         with urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
         return json.loads(raw)
@@ -213,6 +254,7 @@ class GraphQLQueryRunner:
         a product-level `marketoption`, retry once with that attribute moved to
         `priceFilter.purchaseOption` (and removed from productFilter).
         """
+
         def _log_gql_errors(payload: Any) -> None:
             try:
                 errs = payload.get("errors")
@@ -239,7 +281,6 @@ class GraphQLQueryRunner:
                 if isinstance(p, dict):
                     _log_gql_errors(p)
 
-    
                 try:
                     products = (p or {}).get("data", {}).get("products", [])
                 except Exception:

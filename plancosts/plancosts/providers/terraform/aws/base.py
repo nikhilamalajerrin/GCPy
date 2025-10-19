@@ -48,6 +48,7 @@ class BaseAwsPriceComponent:
         self._product_filter_override: Optional[Dict[str, Any]] = None
         self._price_hash: str = ""  
 
+    
     # ---- parity-ish ----
     def AwsResource(self) -> "BaseAwsResource":
         return self.resource_

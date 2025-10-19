@@ -138,6 +138,28 @@ except Exception:
     except Exception:
         AwsRdsClusterInstanceCtor = None  # type: ignore[assignment]
 
+# -------- aws_docdb_cluster_instance --------
+DocdbClusterInstanceCtor = None
+try:
+    # preferred class name in our port
+    from .docdb_cluster_instance import DocdbClusterInstance as DocdbClusterInstanceCtor
+except Exception:
+    try:
+        # fallback if you named it AwsDocdbClusterInstance
+        from .docdb_cluster_instance import AwsDocdbClusterInstance as DocdbClusterInstanceCtor
+    except Exception:
+        DocdbClusterInstanceCtor = None  # type: ignore[assignment]
+
+# -------- aws_elasticsearch_domain --------
+AwsEsDomainCtor = None
+try:
+    from .elasticsearch_domain import ElasticsearchDomain as AwsEsDomainCtor
+except Exception:
+    try:
+        from .aws_elasticsearch_domain import ElasticsearchDomain as AwsEsDomainCtor
+    except Exception:
+        AwsEsDomainCtor = None  # type: ignore[assignment]
+
 # -------- aws_lambda_function --------
 AwsLambdaFunctionCtor = None
 try:
@@ -214,6 +236,16 @@ if AwsRdsClusterInstanceCtor is not None:
     ResourceRegistry["aws_rds_cluster_instance"] = AwsRdsClusterInstanceCtor
 else:
     raise ImportError("rds cluster instance ctor not found (expected rds_cluster_instance)")
+
+if DocdbClusterInstanceCtor is not None:
+    ResourceRegistry["aws_docdb_cluster_instance"] = DocdbClusterInstanceCtor
+else:
+    raise ImportError("docdb cluster instance ctor not found (expected docdb_cluster_instance)")
+
+if AwsEsDomainCtor is not None:
+    ResourceRegistry["aws_elasticsearch_domain"] = AwsEsDomainCtor
+else:
+    raise ImportError("elasticsearch domain ctor not found (expected elasticsearch_domain)")
 
 # Optional: include lambda if present
 if AwsLambdaFunctionCtor is not None:

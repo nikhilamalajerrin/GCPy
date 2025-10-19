@@ -1,104 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --- prerequisites ------------------------------------------------------------
-need() {
-  command -v "$1" >/dev/null 2>&1 || { echo "This script requires '$1'"; exit 1; }
-}
+# --- prerequisites ---
+need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; exit 1; }; }
 need jq
 need curl
 need unzip
-need wget
 need go
+# wget can be replaced by curl -L -o, but we'll keep wget:
+need wget
 
-# --- inputs -------------------------------------------------------------------
 version="${1:-latest}"
 install_path="${2:-}"
 
-# Support either GITHUB_ACCESS_TOKEN or GITHUB_TOKEN (prefer the former to match original script)
-auth_token="${GITHUB_ACCESS_TOKEN:-${GITHUB_TOKEN:-}}"
-headers=()
-if [[ -n "${auth_token}" ]]; then
-  headers=(-H "Authorization: token ${auth_token}")
+# Optional: GitHub token for higher rate limits
+github_headers=()
+if [[ -n "${GITHUB_ACCESS_TOKEN:-}" ]]; then
+  github_headers=(-H "Authorization: token ${GITHUB_ACCESS_TOKEN}")
 fi
 
 goos="$(go env GOOS)"
 goarch="$(go env GOARCH)"
 
-# --- temp workspace -----------------------------------------------------------
+# tmp dir
 tmp_dir="$(mktemp -d)"
-cleanup() { rm -rf "${tmp_dir}"; }
-trap cleanup EXIT
+trap 'rm -rf "${tmp_dir}"' EXIT
 
-# --- fetch release assets -----------------------------------------------------
-api_base="https://api.github.com/repos/infracost/terraform-provider-infracost/releases"
-
+# --- resolve release and download asset(s) ---
+api_base="https://api.github.com/repos/infracost/terraform-provider-infracost"
 if [[ "${version}" == "latest" ]]; then
-  resp="$(curl -sSL "${headers[@]}" "${api_base}/latest")"
-  # Release "name" often equals "vX.Y.Z"
-  version="$(jq -r '.name' <<<"${resp}")"
-
-  echo "Installing terraform-provider-infracost ${version} for ${goos}_${goarch} ..."
-  jq -r \
-    --arg os "${goos}" \
-    --arg arch "${goarch}" \
-    '.assets[] | select(.name | contains("\($os)_\($arch)")) | .browser_download_url' \
-    <<< "${resp}" \
-  | wget -q -P "${tmp_dir}" -i -
+  resp="$(curl -sS "${github_headers[@]}" "${api_base}/releases/latest")"
+  # Prefer tag_name (e.g., v0.1.2)
+  version="$(jq -r '.tag_name // .name' <<<"${resp}")"
+  jq -r --arg os "${goos}" --arg arch "${goarch}" '
+    .assets[]
+    | select(.name | test($os + "_" + $arch))
+    | .browser_download_url
+  ' <<<"${resp}" | xargs -I {} wget -q -P "${tmp_dir}" {}
 else
-  echo "Installing terraform-provider-infracost ${version} for ${goos}_${goarch} ..."
-  curl -sSL "${headers[@]}" "${api_base}" \
-  | jq -r \
-      --arg v "${version}" \
-      --arg os "${goos}" \
-      --arg arch "${goarch}" \
-      '.[] | select(.name == $v) | .assets[] | select(.name | contains("\($os)_\($arch)")) | .browser_download_url' \
-  | wget -q -P "${tmp_dir}" -i -
+  # Fetch all releases and pick the exact tag
+  curl -sS "${github_headers[@]}" "${api_base}/releases" \
+  | jq -r --arg ver "${version}" --arg os "${goos}" --arg arch "${goarch}" '
+      .[]
+      | select((.tag_name // .name) == $ver)
+      | .assets[]
+      | select(.name | test($os + "_" + $arch))
+      | .browser_download_url
+    ' \
+  | xargs -I {} wget -q -P "${tmp_dir}" {}
 fi
 
-# Ensure we downloaded something
+# Ensure we found something
 shopt -s nullglob
 zips=( "${tmp_dir}"/terraform-provider-infracost*.zip )
 if (( ${#zips[@]} == 0 )); then
-  echo "No matching release asset found for ${goos}_${goarch} (version: ${version})."
+  echo "No assets found for ${version} (${goos}_${goarch})." >&2
+  echo "Check the release page or adjust GOOS/GOARCH." >&2
   exit 1
 fi
 
-# --- unzip & pick binary ------------------------------------------------------
-for z in "${zips[@]}"; do
-  unzip -q -d "${tmp_dir}" "${z}"
-  rm -f "${z}"
+# Unzip; grab the provider binary filename
+for zipf in "${zips[@]}"; do
+  unzip -q -d "${tmp_dir}" "${zipf}"
+  rm -f "${zipf}"
 done
 
-# Find the provider binary (supports names like terraform-provider-infracost_vX_Y_Z)
-bin_path=""
-for f in "${tmp_dir}"/terraform-provider-infracost*; do
-  if [[ -f "${f}" && ! "${f}" =~ \.zip$ ]]; then
-    bin_path="${f}"
-    break
-  fi
-done
 
+bin_path="$(ls -1 "${tmp_dir}"/terraform-provider-infracost* 2>/dev/null | head -n1)"
 if [[ -z "${bin_path}" ]]; then
-  echo "Failed to locate provider binary after unzip."
+  echo "Provider binary not found after unzip." >&2
   exit 1
 fi
 chmod +x "${bin_path}"
 
-# --- determine install location ----------------------------------------------
+# Strip leading "v" from version for Terraform plugin path
+version="${version#v}"
+
+# Determine install path
 if [[ -z "${install_path}" ]]; then
   plugin_root_path="${HOME}/.terraform.d/plugins"
   install_path="${plugin_root_path}/infracost.io/infracost/infracost/${version}/${goos}_${goarch}"
   mkdir -p "${install_path}"
-  mv "${bin_path}" "${install_path}/terraform-provider-infracost"
+  mv -f "${bin_path}" "${install_path}/$(basename "${bin_path}")"
 
-  # Legacy path symlink for older Terraform versions
+  # Back-compat symlink for old plugin layout
   mkdir -p "${plugin_root_path}/${goos}_${goarch}"
-  ln -sfn "${install_path}/terraform-provider-infracost" \
-          "${plugin_root_path}/${goos}_${goarch}/terraform-provider-infracost"
+  ln -sfn "${install_path}/$(basename "${bin_path}")" \
+          "${plugin_root_path}/${goos}_${goarch}/$(basename "${bin_path}")"
 else
   mkdir -p "${install_path}"
-  mv "${bin_path}" "${install_path}/terraform-provider-infracost"
+  mv -f "${bin_path}" "${install_path}/$(basename "${bin_path}")"
 fi
 
-echo "Installed terraform-provider-infracost ${version} -> ${install_path}/terraform-provider-infracost"
+echo "Installed terraform-provider-infracost ${version} for ${goos}_${goarch} to:"
+echo "  ${install_path}/$(basename "${bin_path}")"
