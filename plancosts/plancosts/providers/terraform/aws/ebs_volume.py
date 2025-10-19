@@ -51,7 +51,7 @@ def _gb_val(values: Any) -> Decimal:
     return _to_decimal(v.get("size"), Decimal(DEFAULT_VOLUME_SIZE))
 
 def _iops_val(values: Any) -> Decimal:
-    # Default IOPS equals default volume size (8), matching Go change.
+    # Default IOPS equals default volume size (8), matching change.
     v = _raw(values)
     return _to_decimal(v.get("iops"), Decimal(DEFAULT_VOLUME_SIZE))
 
@@ -99,7 +99,7 @@ class _EbsVolumeIOPS(BaseAwsPriceComponent):
 
 class EbsVolume(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/ebs_volume.go:
+    Python port of internal/providers/terraform/aws/ebs_volume:
       - Storage (GB-months) w/ volumeApiName from 'type', qty from 'size'
       - Storage IOPS (IOPS-months) only when type == 'io1', qty from 'iops'
     """
@@ -112,5 +112,5 @@ class EbsVolume(BaseAwsResource):
 
         self._set_price_components(pcs)
 
-# Optional alias like Go’s constructor name
+# Optional alias
 NewEbsVolume = EbsVolume

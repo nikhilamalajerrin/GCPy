@@ -35,7 +35,7 @@ def _monthly_quantity(pc) -> Decimal:
 @pytest.mark.integration
 def test_ebs_snapshot_copy_storage_uses_this_size_when_source_has_volume():
     """
-    Mirrors Go test TestEBSSnapshotCopy:
+    test TestEBSSnapshotCopy:
 
     TF model:
       aws_ebs_volume (size=10) -> aws_ebs_snapshot -> aws_ebs_snapshot_copy

@@ -29,7 +29,7 @@
 
 # class _EbsSnapshotStorageGB(BaseAwsPriceComponent):
 #     """
-#     Mirrors ebsSnapshotCostComponents() from Go:
+#     Mirrors ebsSnapshotCostComponents() :
 
 #     - Name:  "Storage"
 #     - Unit:  "GB-months"
@@ -49,7 +49,7 @@
 #         self.default_filters = [
 #             Filter(key="servicecode", value="AmazonEC2"),
 #             Filter(key="productFamily", value="Storage Snapshot"),
-#             # REGEX to match "...EBS:SnapshotUsage" (end of string), like Go
+#             # REGEX to match "...EBS:SnapshotUsage" (end of string)
 #             Filter(key="usagetype", value="/EBS:SnapshotUsage$/", operation="REGEX"),
 #         ]
 #         self.unit_ = "GB-months"
@@ -94,7 +94,7 @@
 
 # class EbsSnapshot(BaseAwsResource):
 #     """
-#     Python port of internal/providers/terraform/aws/ebs_snapshot.go (NewEbsSnapshot):
+#     Python port of internal/providers/terraform/aws/ebs_snapshot (NewEbsSnapshot):
 
 #     - Single "Storage" GB-months component with usagetype REGEX match.
 #     - Quantity derived from the referenced volume's size when available.
@@ -126,12 +126,7 @@
 #         self._set_price_components([_EbsSnapshotStorageGB(self)])
 
 
-# # Optional export alias like Go’s constructor name if needed elsewhere
 # NewEbsSnapshot = EbsSnapshot
-
-
-
-
 
 
 
@@ -166,7 +161,7 @@ def _raw(values_or_res: Any) -> Dict[str, Any]:
 
 class _EbsSnapshotStorageGB(BaseAwsPriceComponent):
     """
-    Mirrors ebsSnapshotCostComponents() from Go:
+    Mirrors ebsSnapshotCostComponents()
 
     - Name:  "Storage"
     - Unit:  "GB-Mo"  (catalog commonly uses GB-Mo for snapshots)
@@ -233,7 +228,7 @@ class _EbsSnapshotStorageGB(BaseAwsPriceComponent):
 
 class EbsSnapshot(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/ebs_snapshot.go (NewEbsSnapshot):
+    Python port of internal/providers/terraform/aws/ebs_snapshot (NewEbsSnapshot):
 
     - Single "Storage" GB-months component with usagetype REGEX match.
     - Quantity derived from the referenced volume's size when available.
@@ -265,5 +260,4 @@ class EbsSnapshot(BaseAwsResource):
         self._set_price_components([_EbsSnapshotStorageGB(self)])
 
 
-# Optional export alias like Go’s constructor name if needed elsewhere
 NewEbsSnapshot = EbsSnapshot

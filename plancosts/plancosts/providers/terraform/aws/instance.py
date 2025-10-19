@@ -76,7 +76,6 @@ def _extract_tuple_from_any(*args) -> Tuple[str, str, Dict[str, Any], Optional["
 # ---------------- helpers ----------------
 
 def _tenancy_to_api(val: Any) -> str:
-    # Go parity: default "Shared"; "dedicated" -> "Dedicated"
     return "Dedicated" if f"{val}".strip().lower() == "dedicated" else "Shared"
 
 def _bd_volume_type(values: Dict[str, Any]) -> str:
@@ -88,7 +87,7 @@ def _bd_volume_size(values: Dict[str, Any]) -> Decimal:
     return _to_decimal(values.get("volume_size"), Decimal(DEFAULT_VOLUME_SIZE))
 
 def _bd_iops(values: Dict[str, Any]) -> Decimal:
-    # IMPORTANT: for instance block devices, default IOPS to 0 (Go behavior)
+    # IMPORTANT: for instance block devices, default IOPS to 0 
     return _to_decimal(values.get("iops"), Decimal(0))
 
 
@@ -153,7 +152,7 @@ class _BlockDeviceIOPS(BaseAwsPriceComponent):
 
 class AwsBlockDevice(BaseAwsResource):
     """
-    Mirrors newEbsBlockDevice(name, d, region) from Go:
+    Mirrors newEbsBlockDevice(name, d, region) from
       - "Storage" (GB-months)
       - add "Storage IOPS" (IOPS-months) only when volumeApiName in {"io1","io2"} and iops > 0
     """
@@ -173,7 +172,7 @@ class AwsBlockDevice(BaseAwsResource):
 
 class _ComputeHours(BaseAwsPriceComponent):
     """
-    Parity with Go's computeCostComponent for on-demand:
+    Parity with computeCostComponent for on-demand:
       Name: "Compute (on-demand, <instance_type>)"
       Unit: "hours"
       Hourly quantity: 1
@@ -208,7 +207,7 @@ class _ComputeHours(BaseAwsPriceComponent):
 
 class AwsInstance(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/instance.go:
+    Python port of internal/providers/terraform/aws/instance
       - top-level "Compute (on-demand, <instance_type>)" price component
       - sub-resources:
           * root_block_device
@@ -244,5 +243,4 @@ class AwsInstance(BaseAwsResource):
         self._set_sub_resources(subs)
 
 
-# Mirror the Go rename (AwsInstance -> NewInstance) without breaking old imports
 NewInstance = AwsInstance

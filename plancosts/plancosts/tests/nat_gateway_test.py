@@ -113,7 +113,7 @@ PLAN_BASE: Dict[str, Any] = {
 @pytest.mark.integration
 def test_nat_gateway_components_and_hashes():
     """
-    Parity with Go TestNATGateway:
+    TestNATGateway:
       - Two components with exact names
       - Exact price hashes
       - Hourly charge for the gateway (qty=1 per hour)
@@ -161,7 +161,7 @@ def test_nat_gateway_usage_monthly_gb():
     # Attach usage to the resource (port-friendly)
     nat = next((r for r in resources if _res_address(r) == "aws_nat_gateway.nat"), None)
     assert nat is not None, "aws_nat_gateway.nat not parsed"
-    usage_payload = {"monthly_gb_data_processed": 100}  # match Go test usage = 100 GB
+    usage_payload = {"monthly_gb_data_processed": 100} 
     if hasattr(nat, "set_usage") and callable(getattr(nat, "set_usage")):
         nat.set_usage(usage_payload)  # type: ignore[attr-defined]
     else:

@@ -38,7 +38,7 @@ OVERRIDE = {
 
 
 def _usd(price: float) -> dict:
-    # Normalize like Go: trim trailing zeros/dot.
+    # Normalize trim trailing zeros/dot.
     s = f"{price:.6f}"
     s = s.rstrip("0").rstrip(".") if "." in s else s
     return {"USD": s}

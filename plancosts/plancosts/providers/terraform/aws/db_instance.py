@@ -75,13 +75,12 @@ def _license_model(engine: str, license_model: str | None) -> Optional[str]:
     e = (engine or "").strip().lower()
     lm = (license_model or "").strip().lower()
 
-    # Go rule 1: engine implies "License included" for oracle-se1, oracle-se2, sqlserver-*
+  
     if e in ("oracle-se1", "oracle-se2") or e.startswith("sqlserver-"):
         implied = "License included"
     else:
         implied = None
 
-    # Go rule 2: override if user explicitly sets BYOL
     if lm == "bring-your-own-license":
         return "Bring your own license"
 
@@ -89,7 +88,7 @@ def _license_model(engine: str, license_model: str | None) -> Optional[str]:
 
 def _volume_type(raw: Dict[str, Any]) -> str:
     """
-    Go logic:
+    logic:
       default "General Purpose"
       if iops exists (non-null) -> "Provisioned IOPS"
       else if storage_type == "standard" -> "Magnetic"
@@ -208,7 +207,7 @@ class _RdsStorageIops(BaseAwsPriceComponent):
 
 class DbInstance(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/db_instance.go::NewDBInstance
+    Python port of internal/providers/terraform/aws/db_instance::NewDBInstance
 
     Components:
       - "Database instance"         (hours, qty=1)

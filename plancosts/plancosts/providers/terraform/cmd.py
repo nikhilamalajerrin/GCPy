@@ -71,7 +71,7 @@ def terraform_cmd(
     return stdout or b"", None
 
 
-# ---------------- Plan helpers (Go parity) ----------------
+# ---------------- Plan helpers  ----------------
 
 def load_plan_json(path: str) -> bytes:
     with open(path, "rb") as f:
@@ -80,7 +80,6 @@ def load_plan_json(path: str) -> bytes:
 
 def generate_plan_json(tfdir: str, plan_path: str | None = None) -> bytes:
     """
-    Mirrors Go generatePlanJSON:
       - if plan_path is empty: terraform init; terraform plan -out=<tmp>; then show -json
       - else: terraform show -json <plan_path>
     """

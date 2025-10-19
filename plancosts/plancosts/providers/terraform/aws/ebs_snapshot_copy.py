@@ -123,7 +123,6 @@
 #         self._set_price_components([_EbsSnapshotCopyStorageGB(self)])
 
 
-# # Export alias like Go’s constructor name
 # NewEbsSnapshotCopy = EbsSnapshotCopy
 
 
@@ -257,5 +256,5 @@ class EbsSnapshotCopy(BaseAwsResource):
         self._set_price_components([_EbsSnapshotCopyStorageGB(self)])
 
 
-# Export alias like Go’s constructor name
+# Export alias constructor name
 NewEbsSnapshotCopy = EbsSnapshotCopy

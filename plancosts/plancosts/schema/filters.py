@@ -30,7 +30,7 @@ def _omit_none_and_empty(d: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # -----------------------------------------------------------------------------
-# AttributeFilter  (Go: key + value | value_regex)
+# AttributeFilter  (key + value | value_regex)
 # GraphQL keys: "key", "value", "value_regex"
 # -----------------------------------------------------------------------------
 
@@ -97,7 +97,7 @@ class ProductFilter:
         }
         return (_omit_none_and_empty if omit_empty else _omit_none)(d)
 
-    # Convenience constructor (optional)
+   
     @staticmethod
     def aws(service: Optional[str] = None,
             productFamily: Optional[str] = None,

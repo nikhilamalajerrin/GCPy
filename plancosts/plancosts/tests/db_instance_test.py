@@ -95,7 +95,7 @@ BASE_CONF = {
 }
 
 
-# ---------------- tests mirroring Go ----------------
+# ---------------- tests mirroring ----------------
 
 @pytest.mark.integration
 def test_db_instance_matrix():
@@ -242,7 +242,7 @@ def test_db_instance_all_engines():
         assert pc_inst is not None, f"{eng}: missing Database instance component"
         assert _pc_price_hash(pc_inst) == price_hash, f"{eng}: expected {price_hash}, got {_pc_price_hash(pc_inst)}"
 
-        # Storage present with zero quantity (hash constant in Go tests)
+        # Storage present with zero quantity (hash constant tests)
         pc_storage = comps.get("Database storage")
         assert pc_storage is not None, f"{eng}: missing Database storage"
         assert _pc_price_hash(pc_storage) == "b7b7cfbe7ec1bded9a474fff7123b34f-ee3dd7e4624338037ca6fea0933a662f"

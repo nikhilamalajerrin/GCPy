@@ -31,7 +31,7 @@ def _runner() -> GraphQLQueryRunner:
 
 def run_tf_cost_breakdown(tf: str) -> List[object]:
     """
-    Match Go's testutil.RunTFCostBreakdown:
+    Match testutil.RunTFCostBreakdown:
     - accepts a Terraform dir OR a plan.json file path
     - returns priced resources (provider resources), ready to be inspected
     """
@@ -51,7 +51,7 @@ def run_tf_cost_breakdown(tf: str) -> List[object]:
 def extract_price_hashes(resources: List[object]) -> List[Tuple[str, str, str]]:
     """
     Return [[resourceAddress, priceComponentName, priceHash], ...]
-    like the Go helper.
+    like the helper.
     """
     rows: List[Tuple[str, str, str]] = []
     for res in resources:
@@ -60,7 +60,7 @@ def extract_price_hashes(resources: List[object]) -> List[Tuple[str, str, str]]:
         for pc in getattr(res, "price_components")():
             ph = pc.PriceHash() if hasattr(pc, "PriceHash") else getattr(pc, "price_hash", "")
             rows.append((addr, pc.name(), ph))
-        # flatten one level of sub-resources, like Go
+        # flatten one level of sub-resources,
         for sub in getattr(res, "sub_resources")():
             saddr = getattr(sub, "address", None) or sub.address()
             for pc in getattr(sub, "price_components")():
@@ -72,7 +72,7 @@ def extract_price_hashes(resources: List[object]) -> List[Tuple[str, str, str]]:
 def price_component_cost_for(resources: List[object], rn: str, name: str) -> _PCostView | None:
     """
     Find the price component for resource address `rn` with component `name`.
-    Returns an object exposing HourlyCost and Price (like the Go assertion uses).
+    Returns an object exposing HourlyCost and Price.
     """
     def _iter():
         for res in resources:
@@ -130,7 +130,7 @@ def new_test_integration(r: str, n: str, name: str, price_hash: str, tf: str):
         # Relaxed mode: just require a non-empty hash
         assert isinstance(got_hash, str) and len(got_hash) > 0, f"{name}: expected non-empty priceHash"
 
-    # 2) hourly cost equals unit price (like Go)
+    # 2) hourly cost equals unit price
     pvc = price_component_cost_for(resources, rn, name)
     assert pvc is not None, f"price component not found for ({rn}, {name})"
     assert pvc.hourly_cost == pvc.unit_price, f"unexpected cost for {n} hours"

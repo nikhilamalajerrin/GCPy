@@ -39,7 +39,7 @@ def _addresses(resources: Iterable[Any]) -> List[str]:
 @pytest.mark.unit
 def test_load_resources_root_module():
     """
-    Parity with Go:
+    
       TestLoadResources_rootModule
     """
     plan = {
@@ -76,7 +76,7 @@ def test_load_resources_root_module():
 @pytest.mark.unit
 def test_load_resources_nested_module():
     """
-    Parity with Go:
+  
       TestLoadResources_nestedModule
 
     Terraform addresses repeat the literal 'module.' segment for each level:

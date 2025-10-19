@@ -34,7 +34,7 @@ class _ElbClassicHours(BaseAwsPriceComponent):
 
 class Elb(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/elb.go::NewELB.
+    Python port of internal/providers/terraform/aws/elb::NewELB.
 
     This models **Classic ELB** (aws_elb), not Application/Network Load Balancers.
     """

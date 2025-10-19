@@ -4,7 +4,7 @@ from typing import Protocol, List, Any, runtime_checkable
 @runtime_checkable
 class Provider(Protocol):
     """
-    Python analogue of Go's:
+    Python analogue 
 
         type Provider interface {
             ProcessArgs(*cli.Context) error

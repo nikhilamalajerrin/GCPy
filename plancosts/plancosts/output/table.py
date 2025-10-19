@@ -10,7 +10,7 @@ from plancosts.schema.cost_component import CostComponent
 FMT_4DP = "{:.4f}"  # for price & costs
 
 
-# ---- helpers ---------------------------------------------------------------
+# ---- helpers ------------------------------
 
 def _d(x) -> Decimal:
     if isinstance(x, Decimal):
@@ -30,7 +30,7 @@ def _fmt_4dp(val: Any) -> str:
 
 def _fmt_qty(val: Any) -> str:
     """
-    Match Go: strconv.FormatFloat(f, 'f', -1, 64) → fixed-point, no trailing zeros.
+    Match strconv.FormatFloat(f, 'f', -1, 64) → fixed-point, no trailing zeros.
     """
     try:
         s = "{:f}".format(float(_d(val)))
@@ -50,7 +50,7 @@ def _ensure_list(x: Optional[Iterable[Any]]) -> List[Any]:
 
 def _flattened_subresources(res: Resource) -> List[Resource]:
     """
-    Full recursive flatten to mirror Go's FlattenedSubResources().
+    Full recursive flatten to mirror FlattenedSubResources().
     Includes all descendants depth-first.
     """
     out: List[Resource] = []
@@ -71,7 +71,7 @@ def _line_item_count(res: Resource) -> int:
     return count
 
 
-# ---- component accessors (duck-typed) --------------------------------------
+# ---- component accessors (duck-typed) ---------
 
 def _cc_name(cc: CostComponent) -> str:
     return getattr(cc, "name", None) or getattr(cc, "Name", None) or "<component>"
@@ -132,7 +132,7 @@ def _monthly_cost_of(cc: CostComponent) -> Decimal:
     return _d(getattr(cc, "monthly_cost", 0))
 
 
-# ---- rendering -------------------------------------------------------------
+# ---- rendering ---------
 
 def _render_table(rows: List[List[str]]) -> str:
     headers = ["NAME", "MONTHLY QTY", "UNIT", "PRICE", "HOURLY COST", "MONTHLY COST"]
@@ -159,7 +159,6 @@ def _render_table(rows: List[List[str]]) -> str:
 
 def to_table(resources: List[Resource]) -> str:
     """
-    Text-table renderer matching Go's pkg/output/table.go:
 
     Columns: NAME | MONTHLY QTY | UNIT | PRICE | HOURLY COST | MONTHLY COST
     - Includes all sub-resources via a recursive flatten.
@@ -172,7 +171,7 @@ def to_table(resources: List[Resource]) -> str:
     overall_m = Decimal("0")
 
     for res in resources or []:
-        # Go prints resource.Name; fall back to address if needed.
+        
         display = getattr(res, "name", None) or getattr(res, "address", None) or "<resource>"
         rows.append([display, "", "", "", "", ""])
 
@@ -182,7 +181,7 @@ def to_table(resources: List[Resource]) -> str:
         res_h = Decimal("0")
         res_m = Decimal("0")
 
-        # Top-level components (preserve incoming order like Go)
+        # Top-level components 
         for cc in _ensure_list(res.cost_components):
             line_no += 1
             rows.append([

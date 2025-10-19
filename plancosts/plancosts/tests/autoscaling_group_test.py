@@ -193,13 +193,12 @@ def test_asg_launch_configuration():
     resources = parse_plan_json(plan)
     breakdowns = get_cost_breakdowns(_runner(), resources)
 
-    # asg subresource: the referenced launch configuration
+    
     asg_bd = _find_breakdown_by_addr_suffix(breakdowns, "aws_autoscaling_group.asg1")
     assert asg_bd is not None
     lc_bd = _find_breakdown_by_addr_suffix([asg_bd], "aws_launch_configuration.lc1")
     assert lc_bd is not None
 
-    # Price hashes & cost multipliers like Go
     _assert_price_hash(lc_bd, "Compute (on-demand, t3.small)", "ed297854a1dd56ba7b6e2b958de7ac53-d2c98780d7b6e36641b521f1f8145c6f")
     _assert_hourly_multiplier(lc_bd, "Compute (on-demand, t3.small)", Decimal(2))
 

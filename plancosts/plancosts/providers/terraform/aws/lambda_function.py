@@ -122,7 +122,7 @@ def _memory_size_mb(raw: Dict[str, Any]) -> Decimal:
 
 def _gb_seconds(memory_mb: Decimal, request_duration_ms: Decimal, monthly_requests: Decimal) -> Decimal:
     """
-    Port of Go's calculateGBSeconds:
+    Port calculateGBSeconds:
 
       gb := memorySize / 1024
       seconds := ceil(requestDuration / 100) * 0.1   # round up to nearest 100ms, then to seconds
@@ -216,7 +216,7 @@ class _LambdaDuration(BaseAwsPriceComponent):
 
 class LambdaFunction(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/lambda_function.go::NewLambdaFunction
+    Python port of internal/providers/terraform/aws/lambda_function::NewLambdaFunction
 
     Cost components:
       - Requests        (monthly, unit "requests")
@@ -230,6 +230,5 @@ class LambdaFunction(BaseAwsResource):
         ])
 
 
-# Optional alias to mirror Go naming in registries
 NewLambdaFunction = LambdaFunction
 AwsLambdaFunction = LambdaFunction

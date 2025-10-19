@@ -11,7 +11,6 @@ from plancosts.providers.terraform.parser import parse_plan_json
 from plancosts.prices.query import GraphQLQueryRunner
 from plancosts.base.costs import get_cost_breakdowns
 
-# Mirrors the Go helper’s provider boilerplate (kept for parity/documentation).
 # Not strictly required since we ingest plan JSON directly in tests.
 TF_PROVIDERS = """
 provider "aws" {
@@ -29,7 +28,7 @@ provider "infracost" {}
 
 
 def WithProviders(tf: str) -> str:
-    """Return TF config with provider stubs prepended (parity with Go)."""
+    """Return TF config with provider stubs prepended """
     return f"{TF_PROVIDERS}\n{tf}"
 
 
@@ -42,7 +41,7 @@ class TerraformFile:
 def _write_to_tmp_dir(terraform_files: Iterable[TerraformFile]) -> str:
     """
     Create a temp directory and write the provided files there.
-    (We don’t actually run terraform; this is parity with Go helper shape.)
+    (We don’t actually run terraform; this is parity )
     """
     td = tempfile.mkdtemp(prefix="plancosts_")
     for f in terraform_files:
@@ -87,10 +86,10 @@ def LoadResources(tf_plan_json: str | dict) -> List[object]:
 
 def LoadResourcesForProject(terraform_files: List[TerraformFile]) -> List[object]:
     """
-    Parity with the Go helper: accept a list of files, locate/read the plan JSON,
+    Parity with accept a list of files, locate/read the plan JSON,
     and parse it into provider resources.
     """
-    _write_to_tmp_dir(terraform_files)  # keeps the call shape similar to Go
+    _write_to_tmp_dir(terraform_files)  
     plan = _load_plan_from_terraform_files(terraform_files)
     return parse_plan_json(plan)
 
@@ -103,7 +102,6 @@ def RunCostCalculation(
     """
     End-to-end: plan JSON -> resources -> price via GraphQL -> return priced resources.
 
-    Mirrors the Go flow:
       resources := LoadResources(...)
       prices.PopulatePrices(resources)
       schema.CalculateCosts(resources)

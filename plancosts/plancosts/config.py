@@ -33,7 +33,7 @@ def _parse_env_line(line: str) -> Optional[tuple[str, str]]:
     return k.strip(), v.strip().strip('"').strip("'")
 
 def _load_env_file(path: Path) -> None:
-    # Fail-soft; overwrite existing env vars like godotenv.Load
+    # Fail-soft; overwrite existing env vars like dotenv.Load
     if not _file_exists(path):
         return
     try:
@@ -54,7 +54,7 @@ class Config:
     terraform_binary: str = "terraform"
 
 _ENV_PRIORITY = (
-    "INFRACOST_API_URL",                 # Go-compatible (default exists in Go)
+    "INFRACOST_API_URL",                 
     "PLANCOSTS_API_URL",                 # Python back-compat
     "PLAN_COSTS_PRICE_LIST_API_ENDPOINT" # legacy
 )
@@ -77,7 +77,7 @@ def resolve_endpoint(override: str | None = None) -> str:
     return _ensure_graphql_suffix(base)
 
 def load_config(api_url: str | None = None, no_color: bool = False) -> Config:
-    # Mimic Go's loader: repo .env.local then cwd .env
+    #repo .env.local then cwd .env
     _load_env_file(_repo_root() / ".env.local")
     _load_env_file(Path.cwd() / ".env")
 

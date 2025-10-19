@@ -75,7 +75,7 @@ def _runner():
     return GraphQLQueryRunner(os.getenv("PLANCOSTS_PRICE_API", "http://127.0.0.1:4000/graphql"))
 
 
-# ---------------- plan JSON matching the Go test ----------------
+# ---------------- plan JSON matching  ----------------
 
 PLAN: Dict[str, Any] = {
     "format_version": "0.1",

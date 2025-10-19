@@ -23,7 +23,7 @@ def _to_decimal(s: Any, default: Decimal = Decimal(0)) -> Decimal:
 
 def _convert_resource_string(raw: str) -> Decimal:
     """
-    Port of convertResourceString from Go:
+    Port of convertResourceString:
 
     - Trim whitespace
     - Case-insensitive handling of "GB" and "vCPU" suffixes
@@ -171,11 +171,11 @@ class _ElasticInferenceHours(BaseAwsPriceComponent):
 
 class EcsService(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/ecs_service.go
+    Python port of internal/providers/terraform/aws/ecs_service
 
     Only prices launch_type == "FARGATE".
     Reads task_definition (cpu/memory and optional inference accelerator) from
-    ResourceData references if available (Go parity).
+    ResourceData references if available
     """
     def __init__(
         self,
@@ -186,7 +186,7 @@ class EcsService(BaseAwsResource):
     ):
         super().__init__(address, region, raw_values)
 
-        # Not Fargate? Log a warning (Go parity) and return no components.
+        # Not Fargate? Log a warning and return no components.
         launch_type = str(raw_values.get("launch_type") or "")
         if launch_type != "FARGATE":
             log.warning(
@@ -237,6 +237,6 @@ class EcsService(BaseAwsResource):
         self._set_price_components(pcs)
 
 
-# --- Export aliases to mirror Go rename commit (AwsEcsService -> NewEcsService) ---
+
 AwsEcsService = EcsService
 NewEcsService = EcsService

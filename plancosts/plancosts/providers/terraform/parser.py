@@ -231,7 +231,7 @@ def _parse_references(resource_data_map: Dict[str, ResourceData], configurationJ
                     rd.AddReference(attr, target)
 
 
-# ---------------- Usage resources (infracost) ----------------
+# ---------------- Usage resources ----------------
 
 def _is_infracost_resource(rd: ResourceData) -> bool:
     prov = getattr(rd, "ProviderName", "") or getattr(rd, "provider_name", "")

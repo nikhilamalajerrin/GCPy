@@ -61,9 +61,9 @@ class _ASGComputeHours(BaseAwsPriceComponent):
 
 
 
-# ---------------------------------------------------------------------------
+# ------------------------------
 # EBS block devices
-# ---------------------------------------------------------------------------
+# -----------------------------------
 
 class _BlockDeviceGB(BaseAwsPriceComponent):
     def __init__(self, name: str, resource: "BaseAwsResource"):
@@ -120,9 +120,9 @@ class _AwsBlockDevice(BaseAwsResource):
         self._set_price_components(pcs)
 
 
-# ---------------------------------------------------------------------------
-# Quantity scaling wrappers — mirror price_hash both ways
-# ---------------------------------------------------------------------------
+# ----------------------------------------
+# Quantity scaling wrappers 
+# -----------------------------------------
 
 class _ScaledPriceComponent(BaseAwsPriceComponent):
     """

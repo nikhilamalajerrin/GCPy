@@ -44,8 +44,6 @@ def _monthly_quantity(pc) -> Decimal:
 @pytest.mark.integration
 def test_ebs_snapshot_storage_from_volume_reference():
     """
-    Mirrors the Go test:
-
     - Define an aws_ebs_volume with size=10 in us-east-1a
     - Define an aws_ebs_snapshot referencing that volume
     - After pricing, snapshot should have a 'Storage' price component with quantity 10 GB-month

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from plancosts.resource.filters import Filter, ValueMapping, map_filters, merge_filters
 
-DEFAULT_VOLUME_SIZE = 8  # Go parity
+DEFAULT_VOLUME_SIZE = 8  
 
 
 def _to_decimal(val: Any, default: Decimal = Decimal(0)) -> Decimal:
@@ -30,7 +30,7 @@ def str_ptr(s: str) -> str:
 
 class BaseAwsPriceComponent:
     """
-    AWS-specific price component with Go-parity-ish API and helpers
+    AWS-specific price component with API and helpers
     that the GraphQL query layer expects (product_filter/price_filter).
     """
 
@@ -46,9 +46,9 @@ class BaseAwsPriceComponent:
 
         self._price_filter_dict: Optional[Dict[str, Any]] = None
         self._product_filter_override: Optional[Dict[str, Any]] = None
-        self._price_hash: str = ""  # traceability like Go's priceHash
+        self._price_hash: str = ""  
 
-    # ---- Go-parity-ish ----
+    # ---- parity-ish ----
     def AwsResource(self) -> "BaseAwsResource":
         return self.resource_
 
@@ -149,7 +149,7 @@ class BaseAwsPriceComponent:
     # ----------------------------
     def _synth_product_filter(self) -> Dict[str, Any]:
         """
-        Build a Go-like ProductFilter and SKIP empty/None values in attributeFilters.
+        Build a ProductFilter and SKIP empty/None values in attributeFilters.
         IMPORTANT: GraphQL expects camelCase "valueRegex".
         """
         if self._product_filter_override is not None:
@@ -179,7 +179,7 @@ class BaseAwsPriceComponent:
                 continue
 
             if op == "REGEX":
-                attrs.append({"key": k, "valueRegex": v})   # <---- camelCase for GraphQL
+                attrs.append({"key": k, "valueRegex": v})   
             else:
                 attrs.append({"key": k, "value": v})
 
@@ -204,7 +204,7 @@ class BaseAwsPriceComponent:
     def set_price_filter(self, pf: Optional[Dict[str, Any]]) -> None:
         self._price_filter_dict = dict(pf) if pf else None
 
-    # camelCase/Go-like aliases (in case anything calls these)
+    # camelCase(in case anything calls these)
     def ProductFilter(self) -> Dict[str, Any]:
         return self.product_filter()
 
@@ -307,7 +307,7 @@ class BaseAwsResource:
     def name(self) -> str:
         """
         Match schema.Resource.name used by the table renderer;
-        use the Terraform address for clarity (same as Go output).
+        use the Terraform address for clarity (same as output).
         """
         return self.Address()
 

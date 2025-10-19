@@ -123,13 +123,12 @@ def test_elb_classic_hours_component_and_hash():
 
     comps = {_pc_name(pc): pc for pc in _price_components(elb)}
 
-    # Matches Go: component name
     name = "Per Classic Load Balancer"
     assert name in comps, f"Found components: {sorted(comps.keys())}"
 
     pc = comps[name]
 
-    # Hash parity with Go test
+
     expected_hash = "52de45f6e7bf85e2d047a2d9674d9eb2-d2c98780d7b6e36641b521f1f8145c6f"
     got_hash = _pc_price_hash(pc)
     assert got_hash == expected_hash, f"expected hash {expected_hash}, got {got_hash}"

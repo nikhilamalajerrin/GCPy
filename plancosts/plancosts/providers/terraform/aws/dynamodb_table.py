@@ -174,7 +174,7 @@ class PriceComponent:
     def MonthlyCost(self) -> Decimal:
         return self.Price() * self.monthly_quantity()
 
-    # CamelCase (Go-style)
+    # CamelCas
     def HourlyQuantity(self) -> Decimal:
         return self.hourly_quantity()
 

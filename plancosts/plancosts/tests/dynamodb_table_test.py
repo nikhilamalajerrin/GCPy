@@ -110,7 +110,7 @@ def _runner():
     return GraphQLQueryRunner("http://127.0.0.1:4000/graphql")
 
 
-# ---------- the test (parity with Go expectations, adapted to your dataset) ----------
+# ---------- the test (parity adapted to your dataset) ----------
 
 @pytest.mark.integration
 def test_dynamodb_table_provisioned_with_replicas():

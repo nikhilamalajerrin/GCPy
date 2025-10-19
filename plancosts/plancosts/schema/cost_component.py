@@ -23,9 +23,6 @@ def _omit_none(d: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-# -----------------------------
-# Go schema mirrors (1:1 fields)
-# -----------------------------
 
 @dataclass
 class AttributeFilter:
@@ -98,7 +95,7 @@ class CostComponent:
     _unit_price: Decimal = field(default=Decimal(0), init=False, repr=False)
     _price_hash: str = field(default="", init=False, repr=False)
 
-    # ---- Go-like helpers (quantities) ----
+
     def HourlyQuantity(self) -> Decimal:
         if self.hourlyQuantity is not None:
             return _d(self.hourlyQuantity) or Decimal(0)
@@ -119,7 +116,7 @@ class CostComponent:
     def Quantity(self) -> Decimal:
         return self.MonthlyQuantity()
 
-    # ---- Runtime pricing API (Go parity) ----
+    # ---- Runtime pricing API ----
     def SetPrice(self, unit_price: Any) -> None:
         self._unit_price = _d(unit_price) or Decimal(0)
 
@@ -140,10 +137,10 @@ class CostComponent:
 
     def CalculateCosts(self) -> None:
         """
-        No-op for API parity with Go. Our costs are computed on access.
+        No-op for API parity Our costs are computed on access.
         Calling this ensures callers that expect a method won't crash.
         """
-        # Touch properties to mirror side effects in some call paths.
+
         _ = self.HourlyCost()
         _ = self.MonthlyCost()
         # Intentionally no caching here.

@@ -239,7 +239,7 @@ class GraphQLQueryRunner:
                 if isinstance(p, dict):
                     _log_gql_errors(p)
 
-                # If no products and query had product-level marketoption, retry this one
+    
                 try:
                     products = (p or {}).get("data", {}).get("products", [])
                 except Exception:

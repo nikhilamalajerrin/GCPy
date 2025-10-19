@@ -119,7 +119,7 @@ def test_lambda_no_usage_defaults_to_zero():
     # Component presence
     assert "Requests" in pcs and "Duration" in pcs
 
-    # Price hashes (parity with Go test)
+    # Price hashes
     assert _pc_price_hash(pcs["Requests"]) == "134034e58c7ef3bbaf513831c3a0161b-4a9dfd3965ffcbab75845ead7a27fd47"
     assert _pc_price_hash(pcs["Duration"]) == "a562fdf216894a62109f5b642a702f37-1786dd5ddb52682e127baa00bfaa4c48"
 

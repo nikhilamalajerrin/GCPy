@@ -102,7 +102,7 @@ def _runner():
 
 def test_instance_basic():
     """
-    Mirrors Go: aws_instance with t3.small, root volume 10GB, one extra ebs 10GB.
+    aws_instance with t3.small, root volume 10GB, one extra ebs 10GB.
     Validates compute component name/hash and storage component hash/quantities.
     """
     plan = {

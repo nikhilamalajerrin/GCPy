@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_EVEN
 from typing import Any, Dict, List
 
 
-# ---- rounding helpers (match Go: Round(6) -> banker's rounding) ----
+# ---- rounding helpers ----
 
 _D6 = Decimal("0.000001")
 
@@ -27,7 +27,7 @@ def _num(v: Any) -> float:
     return float(_round6(v))
 
 
-# ---- schema accessors (duck-typed to tolerate minor diffs) ----
+# ---- schema accessors ----
 
 def _name(resource) -> str:
     for attr in ("Name", "name"):
@@ -148,7 +148,7 @@ def _cc_monthly_cost(cc) -> Decimal:
     return Decimal(0)
 
 
-# ---- builders (mirror Go structs/tags) ----
+# ---- builders ----
 
 def _new_cost_component_json(cc) -> Dict[str, Any]:
     return {
@@ -181,7 +181,7 @@ def _new_resource_json(resource) -> Dict[str, Any]:
 
 def to_json(resources: List[Any], pretty: bool = False) -> bytes:
     """
-    Return a JSON byte string equivalent to Go's output.ToJSON.
+    Return a JSON byte string equivalent to  output.ToJSON.
     - Rounds all numeric fields to 6 decimal places, banker's rounding.
     - Omits empty arrays for costComponents/subresources (like omitempty).
     """
@@ -191,5 +191,5 @@ def to_json(resources: List[Any], pretty: bool = False) -> bytes:
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
-# Optional alias to mirror Go naming at call sites, if desired.
+# Optional alias
 ToJSON = to_json

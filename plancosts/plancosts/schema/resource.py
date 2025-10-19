@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Callable
 from .cost_component import CostComponent, HOURS_IN_MONTH
 from .resource_data import ResourceData  # for the alias below
 
-# Go's: type ResourceFunc func(*ResourceData, *ResourceData) *Resource
+# ResourceFunc func(*ResourceData, *ResourceData) *Resource
 # In Python we usually pass just one RD; keep the alias for parity if needed.
 ResourceFunc = Callable[[ResourceData], "Resource"]
 
@@ -16,10 +16,10 @@ ResourceFunc = Callable[[ResourceData], "Resource"]
 @dataclass
 class Resource:
     """
-    Python mirror of pkg/schema/resource.go
+    Python mirror of pkg/schema/resource
     """
     name: str
-    # In Go, Name is typically the Terraform address (e.g., "aws_instance.foo").
+    #  Name is typically the Terraform address (e.g., "aws_instance.foo").
     # We keep an optional 'address' for convenience; Address() accessor returns
     # address if set, else falls back to name.
     address: Optional[str] = None
@@ -38,10 +38,10 @@ class Resource:
     def add_cost_component(self, c: CostComponent) -> None:
         self.cost_components.append(c)
 
-    # ---- Go-parity cost rollup ----
+    # ---- parity cost rollup ----
     def CalculateCosts(self) -> None:
         """
-        Go version:
+        version:
           - calls each costComponent.CalculateCosts()
           - sums HourlyCost across components and subresources
           - monthly = hourly * 730
@@ -76,7 +76,7 @@ class Resource:
     def MonthlyCost(self) -> Decimal:
         return self._monthly_cost
 
-    # ---- helpers (Go's FlattenedSubResources) ----
+    # ---- helpers ----
     def FlattenedSubResources(self) -> List["Resource"]:
         subs: List[Resource] = []
         for s in self.sub_resources:
@@ -101,11 +101,11 @@ class Resource:
         }
 
 
-# ---------------- module-level helpers (parity with Go) ----------------
+# ---------------- module-level helpers  ----------------
 
 def CalculateCosts(resources: List[Resource]) -> None:
     """
-    Go: func CalculateCosts(resources []*Resource)
+    func CalculateCosts(resources []*Resource)
     """
     for r in resources:
         r.CalculateCosts()
@@ -113,7 +113,7 @@ def CalculateCosts(resources: List[Resource]) -> None:
 
 def SortResources(resources: List[Resource]) -> None:
     """
-    Go: schema.SortResources(resources)
+    schema.SortResources(resources)
     Sorts in place:
       - resources by Name/Address (case-insensitive)
       - each resource's sub-resources likewise (recursively)

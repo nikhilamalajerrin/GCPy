@@ -149,7 +149,7 @@ except Exception:
         AwsLambdaFunctionCtor = None  # type: ignore[assignment]
 
 
-# -------------------- Public registry (parity with Go) --------------------
+# -------------------- Public registry --------------------
 
 ResourceRegistry: Dict[str, Callable[..., Any]] = {}
 

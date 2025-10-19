@@ -24,7 +24,7 @@ def _iter_price_components(res):
 
 @pytest.mark.integration
 def test_ecs_service():
-    # Terraform-like plan JSON matching the Go test's intent:
+    # Terraform-like plan JSON:
     # - ECS cluster with FARGATE capacity provider
     # - Task def: 2 GB memory, 1 vCPU, one eia2.medium accelerator
     # - Service: desired_count = 2
@@ -158,7 +158,7 @@ def test_ecs_service():
     runner = GraphQLQueryRunner("http://127.0.0.1:4000/graphql")
     get_cost_breakdowns(runner, resources)
 
-    # Expected components from the Go test
+    # Expected components 
     expected_names = {
         "Per GB per hour",
         "Per vCPU per hour",
@@ -168,7 +168,7 @@ def test_ecs_service():
     missing = expected_names - names
     assert not missing, f"missing price components: {sorted(missing)}; got {sorted(names)}"
 
-    # Factors per Go test:
+    # Factors 
     # - memory: 2 GB * desired_count(2) = 4
     # - vCPU: 1 * desired_count(2) = 2
     # - accelerator: 1 * desired_count(2) = 2

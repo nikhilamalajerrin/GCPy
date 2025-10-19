@@ -82,9 +82,9 @@ class _NatGatewayDataProcessed(BaseAwsPriceComponent):
     Quantity: monthly GB; defaults to 0 unless usage is provided.
     ProductFilter: service=AmazonEC2, productFamily=NAT Gateway, usagetype="NatGateway-Bytes"
     """
-    # Support both old/simple and the Go test's nested usage shape.
+
     _USAGE_KEYS = (
-        "gb_data_processed_monthly",  # Go: gb_data_processed_monthly.0.value
+        "gb_data_processed_monthly",  
         "monthly_gb_data_processed",
         "gb_data_processed",
         "data_processed_gb",
@@ -102,7 +102,6 @@ class _NatGatewayDataProcessed(BaseAwsPriceComponent):
         self.unit_ = "GB"
 
     def _quantity_from_usage(self, r: "NatGateway") -> Decimal:
-        # Retrieve attached usage dict from the resource if present.
         usage: Optional[Dict[str, Any]] = None
         if hasattr(r, "usage") and callable(getattr(r, "usage")):
             usage = r.usage()
@@ -123,7 +122,7 @@ class _NatGatewayDataProcessed(BaseAwsPriceComponent):
 
 class NatGateway(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/nat_gateway.go:
+    Python port of internal/providers/terraform/aws/nat_gateway
       - Hourly NAT GW charge ("NatGateway-Hours")
       - Per-GB data processed ("NatGateway-Bytes")
     """
@@ -135,6 +134,5 @@ class NatGateway(BaseAwsResource):
         ])
 
 
-# Export aliases to mirror possible imports elsewhere
 AwsNatGateway = NatGateway
 NewNatGateway = NatGateway

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .cmd import load_plan_json, generate_plan_json
-from .parser import parse_plan_json  # <-- fixed: was `.provider`
+from .parser import parse_plan_json  
 
 @dataclass
 class TerraformProviderArgs:
@@ -18,7 +18,7 @@ class TerraformProvider:
         self.tfplan = ""
         self.tfdir = ""
 
-    # Parity with Go's ProcessArgs: validate combinations
+    
     def process_args(self, args: TerraformProviderArgs) -> None:
         self.tfjson = args.tfjson or ""
         self.tfplan = args.tfplan or ""
@@ -39,13 +39,13 @@ class TerraformProvider:
                 "Please provide either the path to the Terraform project (tfdir) or a Terraform Plan JSON file (tfjson)"
             )
 
-    # Parity with Go's LoadResources
+   
     def load_resources(self):
         if self.tfjson:
             plan_bytes = load_plan_json(self.tfjson)
         else:
             plan_bytes = generate_plan_json(self.tfdir, self.tfplan or None)
 
-        # Your parser returns a list of typed resources
+
         resources = parse_plan_json(plan_bytes)
         return resources

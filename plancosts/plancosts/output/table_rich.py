@@ -30,7 +30,6 @@ def _d(x) -> Decimal:
         return Decimal("0")
 
 def _name_of_resource(r: Any) -> str:
-    # Go uses resource.Name; fall back to address.
     return (
         _call_maybe(r, "name", "Name")
         or _call_maybe(r, "address", "Address")
@@ -71,7 +70,7 @@ def _component_monthly_cost(pc: Any) -> Decimal:
 
 def _flattened_subresources(res: Any) -> List[Any]:
     """
-    Full recursive flatten like Go's FlattenedSubResources(), preserving
+    Full recursive flatten FlattenedSubResources(), preserving
     original order (depth-first).
     """
     out: List[Any] = []
@@ -106,7 +105,7 @@ def render_table(resources: List[Any], *, no_color: bool = False, width: Optiona
     """
     Return a string containing a Rich-rendered table.
 
-    Parity with Go's table:
+    Parity table:
       - NAME (resource line) + blank columns
       - For components: "├─/└─ <ComponentName>"
       - For subresources: "├─/└─ <ComponentName> (<SubresourceName>)"
@@ -116,7 +115,7 @@ def render_table(resources: List[Any], *, no_color: bool = False, width: Optiona
     table = Table(
         show_header=True,
         header_style=None if no_color else "bold",
-        box=None,        # closer to infracost look; use box.SIMPLE for borders
+        box=None,        
         pad_edge=False,
     )
     table.add_column("NAME", justify="left", no_wrap=True)
@@ -126,7 +125,7 @@ def render_table(resources: List[Any], *, no_color: bool = False, width: Optiona
     table.add_column("HOURLY COST", justify="right")
     table.add_column("MONTHLY COST", justify="right")
 
-    # Preserve incoming order like Go (no sorting).
+    # Preserve incoming order 
     resources = list(resources or [])
 
     overall_h = Decimal("0")
@@ -146,7 +145,7 @@ def render_table(resources: List[Any], *, no_color: bool = False, width: Optiona
         res_h = Decimal("0")
         res_m = Decimal("0")
 
-        # Top-level components (preserve order)
+        # Top-level components 
         for pc in _price_components(r):
             line_no += 1
             table.add_row(

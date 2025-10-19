@@ -7,7 +7,7 @@ Pipeline:
 - price each resource in place (GraphQL)
 - render table or JSON
 
-Flags mirror the Go CLI:
+Flags CLI:
   -o, --output         table|json (default: table)
   --log-level          TRACE|DEBUG|INFO|WARN|ERROR (default: WARN)
   -v, --verbose        convenience alias for DEBUG (ignored if --log-level set)
@@ -84,7 +84,7 @@ def _call_maybe(obj: Any, *names: str, default=None):
 
 
 def _name_of_resource(r: Any) -> str:
-    # Prefer name like Go, fall back to address
+    # Prefer name, fall back to address
     return (
         _call_maybe(r, "name", "Name")
         or _call_maybe(r, "address", "Address")
@@ -106,7 +106,7 @@ def _fail(msg: str, ctx: click.Context | None = None) -> None:
 
 def _set_log_level(log_level: str | None, verbose: bool) -> None:
     """
-    Mirror Go levels:
+    levels:
       TRACE -> logging.NOTSET (or DEBUG with extra verbosity)
       DEBUG -> logging.DEBUG
       INFO  -> logging.INFO
@@ -133,7 +133,7 @@ def _set_log_level(log_level: str | None, verbose: bool) -> None:
 
 def _price_with_spinner(resources: List[Any], runner: GraphQLQueryRunner, no_color: bool) -> None:
     """
-    Price all resources, showing a spinner similar to Go's 'Add calculating costs spinner'.
+    Price all resources, showing a spinner 'Add calculating costs spinner'.
     Uses Rich if available; falls back to plain stderr text otherwise.
     """
     total = len(resources)
@@ -205,7 +205,7 @@ def main(
     _set_log_level(log_level, verbose)
     ctx = click.get_current_context()
 
-    # Validate arg combos to mirror Go's behavior
+    # Validate arg combos behavior
     if tfjson and tfplan:
         _fail("Provide only one of --tfjson or --tfplan.", ctx)
     if tfplan and not tfdir:

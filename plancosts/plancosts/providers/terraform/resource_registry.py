@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .aws.resource_registry import ResourceRegistry as AWS_RESOURCE_REGISTRY
 
-# If you later add other cloud providers, merge them here too.
+# If we later add other cloud providers, merge them here too.
 _RESOURCE_REGISTRY: dict[str, callable] = {}
 _RESOURCE_REGISTRY.update(AWS_RESOURCE_REGISTRY)
 

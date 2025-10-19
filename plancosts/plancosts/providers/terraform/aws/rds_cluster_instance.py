@@ -48,5 +48,5 @@ class RdsClusterInstance(BaseAwsResource):
         super().__init__(address, region, raw_values)
         self._set_price_components([_RdsClusterInstanceHours(self)])
 
-# Optional aliases if your registry expects different names
+
 AwsRdsClusterInstance = RdsClusterInstance

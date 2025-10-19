@@ -7,11 +7,11 @@ from typing import Any, Dict, List, Optional, Union
 __all__ = ["JSONResult", "ResourceData"]
 
 
-# --- Minimal gjson-like result wrapper ----------------------------------------
+# --- Minimal gjson-like result wrapper -----------------
 
 class JSONResult:
     """
-    Tiny helper to mimic the gjson.Result API used in the Go code:
+    Tiny helper to mimic the gjson.Result API used in code:
       - Exists()
       - String()
       - Float()
@@ -128,12 +128,12 @@ class JSONResult:
         return JSONResult(cur)
 
 
-# --- ResourceData (schema mirror) ---------------------------------------------
+# --- ResourceData (schema mirror) ------------------
 
 @dataclass
 class ResourceData:
     """
-    Python mirror of Go's pkg/schema/resource_data.go, extended with ProviderName.
+    Python pkg/schema/resource_data, extended with ProviderName.
 
       type ResourceData struct {
           Type          string
@@ -147,14 +147,14 @@ class ResourceData:
     - Supports both constructor forms:
         NewResourceData(type, address, raw_values)
         NewResourceData(type, provider_name, address, raw_values)
-    - Public attributes use Go-style capitalization (Type, Address, ProviderName).
+    - Public attributes use capitalization (Type, Address, ProviderName).
     """
 
     Type: str
     Address: str
     _raw_values: Dict[str, Any] = field(default_factory=dict)
     _references_map: Dict[str, List["ResourceData"]] = field(default_factory=dict)
-    ProviderName: str = ""  # matches Go; kept last for dataclass defaults
+    ProviderName: str = ""  # matches; kept last for dataclass defaults
 
     @classmethod
     def NewResourceData(
@@ -186,7 +186,7 @@ class ResourceData:
         raw_values = raw_or_address if isinstance(raw_or_address, dict) else {}
         return cls(resource_type, address, dict(raw_values), {}, "")
 
-    # Go-like API
+    # API
     def Get(self, key: str) -> JSONResult:
         return JSONResult(self._raw_values).Get(key)
 

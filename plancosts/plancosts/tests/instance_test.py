@@ -112,7 +112,7 @@ def _find_component(resources: list[Any], resource_name: str, comp_name: str):
 
 @pytest.mark.integration
 def test_aws_instance_integration():
-    # Terraform plan JSON equivalent of the Go test’s HCL
+  
     tf_plan = {
         "format_version": "0.1",
         "terraform_version": "0.14.0",
@@ -190,7 +190,7 @@ def test_aws_instance_integration():
     runner = GraphQLQueryRunner("http://127.0.0.1:4000/graphql")
     get_cost_breakdowns(runner, resources)
 
-    # 3) Check price hashes (parity with Go test)
+    # 3) Check price hashes 
     expected_price_hashes = [
         ["aws_instance.instance1", "Compute (m3.medium)", "666e02bbe686f6950fd8a47a55e83a75-d2c98780d7b6e36641b521f1f8145c6f"],
         ["aws_instance.instance1.root_block_device", "Storage", "efa8e70ebe004d2e9527fd30d50d09b2-ee3dd7e4624338037ca6fea0933a662f"],

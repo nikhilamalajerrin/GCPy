@@ -99,7 +99,7 @@ class _LbHours(BaseAwsPriceComponent):
 
 class Lb(BaseAwsResource):
     """
-    Python port of internal/providers/terraform/aws/lb.go:
+    Python port of internal/providers/terraform/aws/lb
       - ALB/NLB hourly component with dynamic name/product family from load_balancer_type.
     """
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):

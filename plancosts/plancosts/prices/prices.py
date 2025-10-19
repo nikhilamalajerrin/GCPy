@@ -18,7 +18,6 @@ def _to_decimal(v: Any) -> Decimal:
 
 def _set_component_price(resource: Resource, component: CostComponent, gql_result: Dict[str, Any]) -> None:
     """
-    Mirrors Go setCostComponentPrice behavior:
       - If no products/prices -> warn and set 0
       - If multiple products/prices -> warn and use first
       - Set unit price and optional priceHash
@@ -52,7 +51,6 @@ def _set_component_price(resource: Resource, component: CostComponent, gql_resul
     
     component.SetPrice(price_value)
 
-    # Optional traceability like Go's priceHash
     if isinstance(price_hash, str) and price_hash:
         try:
             component.SetPriceHash(price_hash)
