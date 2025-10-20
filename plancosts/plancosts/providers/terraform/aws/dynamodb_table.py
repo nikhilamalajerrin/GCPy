@@ -45,44 +45,148 @@ class DynamoDbTable:
     # ---- helpers ----
     def _init_components(self) -> None:
         """
-        Create WCU and RCU for PROVISIONED billing mode only.
-        PAY_PER_REQUEST is not emitted here (on-demand request units not modeled yet).
+        PROVISIONED:
+          - WCU/RCU hourly capacity
+        PAY_PER_REQUEST:
+          - Read/Write request units (and IA variants) derived from monthly usage
         """
         billing_mode = str(self.raw.get("billing_mode", "PROVISIONED")).upper()
-        if billing_mode != "PROVISIONED":
+
+        if billing_mode == "PROVISIONED":
+            write_capacity = float(self.raw.get("write_capacity") or 0)
+            read_capacity = float(self.raw.get("read_capacity") or 0)
+
+            # WCU (Provisioned): constrain by usagetype + group
+            wcu = PriceComponent(
+                name="Write capacity unit (WCU)",
+                quantity=write_capacity,              # capacity per hour
+                unit="WCU-hours",
+                region=self.region,
+                service="AmazonDynamoDB",
+                purchase_option="on_demand",
+                usagetype="WriteCapacityUnit-Hrs",
+                extra_attr_filters=[{"key": "group", "value": "DDB-WriteUnits"}],
+            )
+            self._add_component(wcu)
+
+            # RCU (Provisioned): constrain by usagetype + group
+            rcu = PriceComponent(
+                name="Read capacity unit (RCU)",
+                quantity=read_capacity,               # capacity per hour
+                unit="RCU-hours",
+                region=self.region,
+                service="AmazonDynamoDB",
+                purchase_option="on_demand",
+                usagetype="ReadCapacityUnit-Hrs",
+                extra_attr_filters=[{"key": "group", "value": "DDB-ReadUnits"}],
+            )
+            self._add_component(rcu)
             return
 
-        write_capacity = float(self.raw.get("write_capacity") or 0)
-        read_capacity = float(self.raw.get("read_capacity") or 0)
+        if billing_mode == "PAY_PER_REQUEST":
+            usage = self.raw.get("_usage", {}) or {}
+            # monthly request units (integers) -> convert to hourly quantities
+            def _mh(key: str) -> float:
+                v = Decimal(str(usage.get(key, 0) or 0))
+                return float((v / HOURS_PER_MONTH) if v else Decimal("0"))
 
-        # WCU (Provisioned): constrain by usagetype + group
-        wcu = PriceComponent(
-            name="Write capacity unit (WCU)",
-            quantity=write_capacity,              # capacity per hour
-            unit="WCU-hours",
-            region=self.region,
-            service="AmazonDynamoDB",
-            purchase_option="on_demand",
-            usagetype="WriteCapacityUnit-Hrs",
-            extra_attr_filters=[{"key": "group", "value": "DDB-WriteUnits"}],
-        )
-        self._add_component(wcu)
+            # Standard RRU/WRU
+            rru_h = _mh("monthly_read_request_units")
+            wru_h = _mh("monthly_write_request_units")
 
-        # RCU (Provisioned): constrain by usagetype + group
-        rcu = PriceComponent(
-            name="Read capacity unit (RCU)",
-            quantity=read_capacity,               # capacity per hour
-            unit="RCU-hours",
-            region=self.region,
-            service="AmazonDynamoDB",
-            purchase_option="on_demand",
-            usagetype="ReadCapacityUnit-Hrs",
-            extra_attr_filters=[{"key": "group", "value": "DDB-ReadUnits"}],
-        )
-        self._add_component(rcu)
+            if rru_h > 0:
+                rru = PriceComponent(
+                    name="Read request units (RRU)",
+                    quantity=rru_h,
+                    unit="request units",
+                    region=self.region,
+                    service="AmazonDynamoDB",
+                    purchase_option="on_demand",
+                    usagetype="ReadRequestUnits",
+                    extra_attr_filters=[{"key": "group", "value": "DDB-ReadUnits"}],
+                )
+                self._add_component(rru)
+
+            if wru_h > 0:
+                wru = PriceComponent(
+                    name="Write request units (WRU)",
+                    quantity=wru_h,
+                    unit="request units",
+                    region=self.region,
+                    service="AmazonDynamoDB",
+                    purchase_option="on_demand",
+                    usagetype="WriteRequestUnits",
+                    extra_attr_filters=[{"key": "group", "value": "DDB-WriteUnits"}],
+                )
+                self._add_component(wru)
+
+            # Infrequent Access (IA) RRU/WRU, if provided
+            ia_rru_h = _mh("monthly_ia_read_request_units")
+            ia_wru_h = _mh("monthly_ia_write_request_units")
+
+            if ia_rru_h > 0:
+                ia_rru = PriceComponent(
+                    name="IA read request units (RRU-IA)",
+                    quantity=ia_rru_h,
+                    unit="request units",
+                    region=self.region,
+                    service="AmazonDynamoDB",
+                    purchase_option="on_demand",
+                    usagetype="IA-ReadRequestUnits",
+                    extra_attr_filters=[{"key": "group", "value": "DDB-ReadUnitsIA"}],
+                )
+                self._add_component(ia_rru)
+
+            if ia_wru_h > 0:
+                ia_wru = PriceComponent(
+                    name="IA write request units (WRU-IA)",
+                    quantity=ia_wru_h,
+                    unit="request units",
+                    region=self.region,
+                    service="AmazonDynamoDB",
+                    purchase_option="on_demand",
+                    usagetype="IA-WriteRequestUnits",
+                    extra_attr_filters=[{"key": "group", "value": "DDB-WriteUnitsIA"}],
+                )
+                self._add_component(ia_wru)
+
+            # (Optional) You can add replicated on-demand writes if you pass usage:
+            # monthly_repl_write_request_units / monthly_ia_repl_write_request_units
+            # Uncomment if/when you provide usage for those:
+            # repl_wru_h = _mh("monthly_repl_write_request_units")
+            # if repl_wru_h > 0:
+            #     rw = PriceComponent(
+            #         name="Replicated write request units (rWRU)",
+            #         quantity=repl_wru_h,
+            #         unit="request units",
+            #         region=self.region,
+            #         service="AmazonDynamoDB",
+            #         purchase_option="on_demand",
+            #         usagetype="ReplWriteRequestUnits",
+            #         extra_attr_filters=[{"key": "group", "value": "DDB-ReplicatedWriteUnits"}],
+            #     )
+            #     self._add_component(rw)
+            #
+            # ia_repl_wru_h = _mh("monthly_ia_repl_write_request_units")
+            # if ia_repl_wru_h > 0:
+            #     irw = PriceComponent(
+            #         name="IA replicated write request units (rWRU-IA)",
+            #         quantity=ia_repl_wru_h,
+            #         unit="request units",
+            #         region=self.region,
+            #         service="AmazonDynamoDB",
+            #         purchase_option="on_demand",
+            #         usagetype="IA-ReplWriteRequestUnits",
+            #         extra_attr_filters=[{"key": "group", "value": "DDB-ReplicatedWriteUnitsIA"}],
+            #     )
+            #     self._add_component(irw)
+
+            return
+
+        # Any other unexpected mode: nothing to add.
 
     def _init_replicas(self) -> None:
-        """Create replica sub-resources (rWCU) for Global Tables."""
+        """Create replica sub-resources (rWCU) for Global Tables (PROVISIONED)."""
         replicas = self.raw.get("replica", []) or []
         write_capacity = float(self.raw.get("write_capacity") or 0)
 
@@ -129,7 +233,7 @@ class PriceComponent:
         extra_attr_filters: Optional[List[Dict[str, Any]]] = None,
     ):
         self.name = name
-        # quantity is the per-hour capacity (e.g., WCU or RCU)
+        # quantity is per-hour (for request units we pre-divide the monthly usage)
         self.quantity = float(quantity or 0.0)
         self.unit = unit
 
@@ -137,7 +241,7 @@ class PriceComponent:
         self.price: Decimal = Decimal("0")
         self.price_hash: Optional[str] = None
 
-        # Attribute filters (default include region; rWCU will override later)
+        # Attribute filters (default include region; rWCU replica will override later)
         attr_filters: List[Dict[str, Any]] = [
             {"key": "servicecode", "value": service},
             {"key": "regionCode", "value": region},
@@ -159,8 +263,7 @@ class PriceComponent:
         if description_regex:
             self.price_filter["descriptionRegex"] = description_regex
 
-    # ---- quantity helpers (provide multiple spellings for renderers) ----
-    # snake_case
+    # ---- quantity helpers ----
     def hourly_quantity(self) -> Decimal:
         return Decimal(str(self.quantity))
 
@@ -174,7 +277,7 @@ class PriceComponent:
     def MonthlyCost(self) -> Decimal:
         return self.Price() * self.monthly_quantity()
 
-    # CamelCas
+    # CamelCase
     def HourlyQuantity(self) -> Decimal:
         return self.hourly_quantity()
 
@@ -235,7 +338,7 @@ class PriceComponentCost:
 
 class ReplicaResource:
     """
-    Sub-resource representing a DynamoDB Global Table replica region.
+    Sub-resource representing a DynamoDB Global Table replica region (PROVISIONED rWCU).
 
     Exposes:
       - address() -> str

@@ -1,83 +1,88 @@
-
 {
-    "format_version": "0.1",
-    "terraform_version": "0.14.0",
-    "configuration": {
-      "provider_config": {
-        "aws": {
-          "expressions": {
-            "region": { "constant_value": "us-east-1" }
-          }
+  "format_version": "0.1",
+  "terraform_version": "0.14.0",
+  "configuration": {
+    "provider_config": {
+      "aws": {
+        "expressions": {
+          "region": { "constant_value": "us-east-1" }
         }
-      },
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_dynamodb_table.provisioned_tbl",
-            "mode": "managed",
-            "type": "aws_dynamodb_table",
-            "name": "provisioned_tbl",
-            "provider_config_key": "aws",
-            "expressions": {
-              "billing_mode": { "constant_value": "PROVISIONED" },
-              "read_capacity": { "constant_value": 100 },
-              "write_capacity": { "constant_value": 50 },
-              "replica": [
-                { "region_name": { "constant_value": "us-west-2" } },
-                { "region_name": { "constant_value": "eu-west-1" } }
-              ]
-            },
-            "schema_version": 0
-          },
-          {
-            "address": "aws_dynamodb_table.on_demand_tbl",
-            "mode": "managed",
-            "type": "aws_dynamodb_table",
-            "name": "on_demand_tbl",
-            "provider_config_key": "aws",
-            "expressions": {
-              "billing_mode": { "constant_value": "PAY_PER_REQUEST" }
-            },
-            "schema_version": 0
-          }
-        ]
       }
     },
-    "planned_values": {
-      "root_module": {
-        "resources": [
-          {
-            "address": "aws_dynamodb_table.provisioned_tbl",
-            "mode": "managed",
-            "type": "aws_dynamodb_table",
-            "name": "provisioned_tbl",
-            "provider_name": "aws",
-            "schema_version": 0,
-            "values": {
-              "billing_mode": "PROVISIONED",
-              "read_capacity": 100,
-              "write_capacity": 50,
-              "replica": [
-                { "region_name": "us-west-2" },
-                { "region_name": "eu-west-1" }
-              ],
-              "tags": null
-            }
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_dynamodb_table.provisioned_tbl",
+          "mode": "managed",
+          "type": "aws_dynamodb_table",
+          "name": "provisioned_tbl",
+          "provider_config_key": "aws",
+          "expressions": {
+            "billing_mode": { "constant_value": "PROVISIONED" },
+            "read_capacity": { "constant_value": 100 },
+            "write_capacity": { "constant_value": 50 },
+            "replica": [
+              { "region_name": { "constant_value": "us-west-2" } },
+              { "region_name": { "constant_value": "eu-west-1" } }
+            ]
           },
-          {
-            "address": "aws_dynamodb_table.on_demand_tbl",
-            "mode": "managed",
-            "type": "aws_dynamodb_table",
-            "name": "on_demand_tbl",
-            "provider_name": "aws",
-            "schema_version": 0,
-            "values": {
-              "billing_mode": "PAY_PER_REQUEST",
-              "tags": null
+          "schema_version": 0
+        },
+        {
+          "address": "aws_dynamodb_table.on_demand_tbl",
+          "mode": "managed",
+          "type": "aws_dynamodb_table",
+          "name": "on_demand_tbl",
+          "provider_config_key": "aws",
+          "expressions": {
+            "billing_mode": { "constant_value": "PAY_PER_REQUEST" }
+          },
+          "schema_version": 0
+        }
+      ]
+    }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_dynamodb_table.provisioned_tbl",
+          "mode": "managed",
+          "type": "aws_dynamodb_table",
+          "name": "provisioned_tbl",
+          "provider_name": "aws",
+          "schema_version": 0,
+          "values": {
+            "billing_mode": "PROVISIONED",
+            "read_capacity": 100,
+            "write_capacity": 50,
+            "replica": [
+              { "region_name": "us-west-2" },
+              { "region_name": "eu-west-1" }
+            ],
+            "tags": null
+          }
+        },
+        {
+          "address": "aws_dynamodb_table.on_demand_tbl",
+          "mode": "managed",
+          "type": "aws_dynamodb_table",
+          "name": "on_demand_tbl",
+          "provider_name": "aws",
+          "schema_version": 0,
+          "values": {
+            "billing_mode": "PAY_PER_REQUEST",
+            "tags": null,
+
+            "_usage": {
+              "monthly_read_request_units": 5000000,
+              "monthly_write_request_units": 1500000,
+              "monthly_ia_read_request_units": 0,
+              "monthly_ia_write_request_units": 0
             }
           }
-        ]
-      }
+        }
+      ]
     }
   }
-  
+}

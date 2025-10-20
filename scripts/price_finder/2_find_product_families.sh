@@ -4,12 +4,11 @@
 # Requires: gq (GraphQL CLI) and jq
 #
 # Env overrides:
-#   ENDPOINT=https://pricing.infracost.io/graphql
 #   REGION=us-east-1
 
 set -eu
 
-: "${ENDPOINT:=https://pricing.infracost.io/graphql}"
+: "${ENDPOINT:=http://127.0.0.1:4000/graphql}"
 : "${REGION:=us-east-1}"
 
 if [ $# -lt 1 ]; then

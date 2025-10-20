@@ -1,16 +1,16 @@
 #!/bin/sh
-# List UNIQUE values for a given attribute key
-# Usage: ./4_find_attribute_values.sh "<Service>" "<ProductFamily>" <attribute-key> [region] [key=value ...]
+# Dump key=value pairs (unique) for a service + productFamily
+# Usage: ./5_find_all_attribute_key_values.sh "<Service>" "<ProductFamily>" [region] [key=value ...]
 set -eu
 : "${ENDPOINT:=http://127.0.0.1:4000/graphql}"
 : "${REGION:=us-east-1}"
 
-if [ $# -lt 3 ]; then
-  echo "Usage: $0 <Service> <ProductFamily> <attribute-key> [region] [key=value ...]" >&2
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <Service> <ProductFamily> [region] [key=value ...]" >&2
   exit 1
 fi
 
-SERVICE="$1"; PRODUCT_FAMILY="$2"; ATTR_KEY="$3"; shift 3
+SERVICE="$1"; PRODUCT_FAMILY="$2"; shift 2
 if [ $# -gt 0 ] && printf '%s' "$1" | grep -Eq '^[a-z]{2}-'; then REGION="$1"; shift; fi
 
 need(){ command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; exit 1; }; }
@@ -44,11 +44,11 @@ if [ "$(echo "$RESP" | jq 'has("errors")')" = "true" ]; then
   exit 1
 fi
 
-echo "$RESP" | jq -r --arg k "$ATTR_KEY" '
+echo "$RESP" | jq -r '
   .data.products
   | map(.attributes // [])
   | flatten
-  | map(select(.key==$k) | .value)
+  | map("\(.key)=\(.value)")
   | unique
   | sort
   | .[]'
