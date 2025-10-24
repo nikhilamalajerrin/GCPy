@@ -552,6 +552,11 @@ def _print_versions_and_exit(ctx: click.Context, param: click.Option, value: boo
 @click.option("--log-level", type=click.Choice(["TRACE", "DEBUG", "INFO", "WARN", "ERROR"], case_sensitive=True), help="Log level.")
 @click.option("-v", "--verbose", is_flag=True, help="Enable DEBUG logs (ignored if --log-level is set).")
 @click.option("--no-color", is_flag=True, help="Turn off colored output.")
+@click.option(
+    "--show-skipped",
+    is_flag=True,
+    help="Print the list of skipped (unsupported) resources in the output summary.",
+)
 def main(
     tfjson: str | None,
     tfplan: str | None,
@@ -562,7 +567,10 @@ def main(
     log_level: str | None,
     verbose: bool,
     no_color: bool,
+    show_skipped: bool,   # ✅ new parameter
 ) -> None:
+
+
     """Generate cost reports from Terraform plans."""
     _set_log_level(log_level, verbose)
     ctx = click.get_current_context()

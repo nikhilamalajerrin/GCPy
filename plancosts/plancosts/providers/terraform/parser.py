@@ -345,10 +345,10 @@ def _create_resource_from_rd(
     usage_map: Optional[Dict[str, ResourceData]] = None,
 ):
     """
-    Instantiate a typed resource (try Python signatures first so we always pass a safe dict):
-      1) ctor(address, region, raw, rd)
-      2) ctor(address, region, raw)
-      3) ctor(resourceData, usageResourceData)
+    Mirrors Go's createResource:
+    - Try to find constructor from registry.
+    - Instantiate and set ResourceType when found.
+    - If unsupported, return a placeholder Resource with IsSkipped=True.
     """
     rtype = rd.Type
     address = rd.Address
@@ -363,23 +363,50 @@ def _create_resource_from_rd(
         if len(parts) > 3 and parts[3]:
             region = parts[3]
 
-    # 🔹 Support RegistryItem wrapper (with .rfunc)
     ctor_entry = _RESOURCE_CONSTRUCTORS.get(rtype)
-    if ctor_entry is None:
-        return None
-    ctor = getattr(ctor_entry, "rfunc", None) or ctor_entry
+    if ctor_entry:
+        ctor = getattr(ctor_entry, "rfunc", None) or ctor_entry
 
-    try:
-        return ctor(address, region, raw, rd)  # type: ignore[misc,call-arg]
-    except TypeError:
-        pass
-    try:
-        return ctor(address, region, raw)  # type: ignore[misc,call-arg]
-    except TypeError:
-        pass
+        res = None
+        usage_rd = (usage_map or {}).get(address)
+        try:
+            res = ctor(rd, usage_rd)
+        except TypeError:
+            try:
+                res = ctor(address, region, raw, rd)
+            except TypeError:
+                try:
+                    res = ctor(address, region, raw)
+                except TypeError:
+                    res = None
 
-    usage_rd = (usage_map or {}).get(address)
-    return ctor(rd, usage_rd)  # type: ignore[misc,call-arg]
+        if res is not None:
+            try:
+                setattr(res, "ResourceType", rtype)
+            except Exception:
+                pass
+            return res
+
+    # --- Fallback: return skipped resource placeholder ---
+    class _SkippedResource:
+        def __init__(self, address: str, rtype: str):
+            self._address = address
+            self._rtype = rtype
+            self.ResourceType = rtype
+            self.IsSkipped = True
+            self.SkipMessage = "This resource is not currently supported"
+
+        def address(self) -> str:
+            return self._address
+
+        def name(self) -> str:
+            return self._address
+
+        def __repr__(self):
+            return f"<SkippedResource {self._address} ({self._rtype})>"
+
+    return _SkippedResource(address, rtype)
+
 
 
 

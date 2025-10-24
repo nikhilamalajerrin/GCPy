@@ -26,7 +26,6 @@ Support for the following is not currently included:
 | `aws_lambda_function` | |
 | `aws_lb` | |
 | `aws_nat_gateway` | |
-| `aws_nlb` | |
 | `aws_rds_cluster_instance` | |
 
 
