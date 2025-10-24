@@ -8,8 +8,6 @@ from plancosts.resource.filters import Filter
 from .base import BaseAwsPriceComponent, BaseAwsResource
 
 
-# Minimal region->location map to ensure unique price selection.
-# Extend if you use more regions.
 _REGION_TO_LOCATION = {
     "us-east-1": "US East (N. Virginia)",
     "us-east-2": "US East (Ohio)",
@@ -53,19 +51,10 @@ def _to_db_engine(v: Any) -> str:
         return "Aurora MySQL"
     if s == "aurora-postgresql":
         return "Aurora PostgreSQL"
-    # Default to Aurora MySQL if unknown/blank to keep behavior stable
     return "Aurora MySQL"
 
 
 class _RdsClusterInstanceHours(BaseAwsPriceComponent):
-    """
-    Name:  "Database instance"
-    Unit:  hours (qty = 1/hour)
-    Service: AmazonRDS
-    ProductFamily: Database Instance
-    Attribute filters: location, instanceType, databaseEngine
-    """
-
     def __init__(self, r: "RdsClusterInstance"):
         super().__init__(name="Database instance", resource=r, time_unit="hour")
 
@@ -76,20 +65,15 @@ class _RdsClusterInstanceHours(BaseAwsPriceComponent):
         db_engine = _to_db_engine(raw.get("engine"))
         location = _region_to_location(r.region)
 
-        # Base attribute filters to ensure a *single* product match.
         self.default_filters = [
             Filter(key="servicecode", value="AmazonRDS"),
             Filter(key="productFamily", value="Database Instance"),
-            # Location is crucial to avoid multiple regional SKUs
             *( [Filter(key="location", value=location)] if location else [] ),
             Filter(key="instanceType", value=instance_type),
             Filter(key="databaseEngine", value=db_engine),
         ]
 
-        # Keep on-demand to avoid RI/savings-plan terms accidentally matching
         self.set_price_filter({"purchaseOption": "on_demand"})
-
-        # One hour unit; quantity is calculated per hour
         self.SetQuantityMultiplierFunc(lambda _r: Decimal(1))
         self.unit_ = "hours"
 
@@ -101,3 +85,4 @@ class RdsClusterInstance(BaseAwsResource):
 
 
 AwsRdsClusterInstance = RdsClusterInstance
+NewRdsClusterInstance = RdsClusterInstance

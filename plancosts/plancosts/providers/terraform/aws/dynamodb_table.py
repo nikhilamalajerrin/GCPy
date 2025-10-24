@@ -395,3 +395,42 @@ class ReplicaResource:
 
     def price_components(self) -> List[PriceComponent]:
         return self._price_components
+
+    # ---------------------------------------------------------------------
+# Registry factory function (parity with Infracost)
+# ---------------------------------------------------------------------
+
+def NewDynamoDBTable(d, u=None) -> DynamoDbTable:
+    """
+    Factory used by the Terraform parser when creating resources.
+
+    Mirrors:
+      func NewDynamoDBTable(d *schema.ResourceData, u *schema.ResourceData) *schema.Resource
+
+    Parameters
+    ----------
+    d : schema.ResourceData-like
+        Plan data object containing configuration or planned values.
+    u : schema.ResourceData-like, optional
+        Unused update data (kept for parity).
+
+    Returns
+    -------
+    DynamoDbTable
+    """
+    # Extract region safely
+    try:
+        region = d.Get("region").String()
+    except Exception:
+        region = getattr(d, "region", None) or "us-east-1"
+
+    # Extract billing mode and capacities from the plan JSON
+    try:
+        raw = d.RawValues if hasattr(d, "RawValues") else d.values if hasattr(d, "values") else {}
+    except Exception:
+        raw = {}
+
+    address = getattr(d, "Address", None) or getattr(d, "address", "aws_dynamodb_table.unknown")
+
+    # Create and return the DynamoDbTable instance
+    return DynamoDbTable(address, region, raw, rd=d)

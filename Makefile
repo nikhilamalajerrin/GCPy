@@ -10,7 +10,7 @@ ARGS ?=
 # Dev tools
 DEV_PKGS  := black isort ruff mypy pytest build wheel
 
-.PHONY: deps run build clean test fmt lint typecheck check release help
+.PHONY: deps run build clean test fmt lint typecheck check release help docs
 
 help:
 	@echo "make deps        - install dev dependencies"
@@ -22,6 +22,7 @@ help:
 	@echo "make fmt         - run black + isort"
 	@echo "make lint        - run ruff"
 	@echo "make typecheck   - run mypy"
+	@echo "make docs        - generate supported_resources.md from templates"
 	@echo "make check       - fmt + lint + typecheck + tests"
 
 deps:
@@ -39,7 +40,7 @@ build:
 clean:
 	find . -name "__pycache__" -type d -exec rm -rf {} +
 	rm -rf build dist *.egg-info .pytest_cache .mypy_cache .ruff_cache
-	rm -rf release
+	rm -rf release docs/generated
 
 test:
 	pytest -q
@@ -56,6 +57,12 @@ typecheck:
 	mypy $(PACKAGE) || true
 
 check: fmt lint typecheck test
+
+# -------- Docs (Infracost-generate-docs equivalent) --------
+docs:
+	@echo "📘 Generating supported_resources.md ..."
+	$(PY) -m plancosts.internal.cmd.generate_docs --input ./docs/templates --output ./docs/generated --log-level INFO
+	@echo "✅ Docs generated under docs/generated/"
 
 # -------- Release (Infracost-style packing) --------
 # Creates tarballs under release/ from dist/ artifacts.

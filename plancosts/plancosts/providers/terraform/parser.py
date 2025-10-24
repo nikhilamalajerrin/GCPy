@@ -353,11 +353,9 @@ def _create_resource_from_rd(
     rtype = rd.Type
     address = rd.Address
 
-    # raw_values is normalized to callable+dict in _parse_resource_data
     raw_obj = getattr(rd, "raw_values", _CallableDict({}))
     raw = raw_obj() if callable(raw_obj) else dict(raw_obj or {})
 
-    # Detect region from raw/arn
     region = (raw.get("region") or provider_region)
     arn = raw.get("arn")
     if isinstance(arn, str) and arn:
@@ -365,9 +363,11 @@ def _create_resource_from_rd(
         if len(parts) > 3 and parts[3]:
             region = parts[3]
 
-    ctor = _RESOURCE_CONSTRUCTORS.get(rtype)
-    if not ctor:
+    # 🔹 Support RegistryItem wrapper (with .rfunc)
+    ctor_entry = _RESOURCE_CONSTRUCTORS.get(rtype)
+    if ctor_entry is None:
         return None
+    ctor = getattr(ctor_entry, "rfunc", None) or ctor_entry
 
     try:
         return ctor(address, region, raw, rd)  # type: ignore[misc,call-arg]
@@ -380,6 +380,7 @@ def _create_resource_from_rd(
 
     usage_rd = (usage_map or {}).get(address)
     return ctor(rd, usage_rd)  # type: ignore[misc,call-arg]
+
 
 
 # ---------------- Top-level parse ----------------

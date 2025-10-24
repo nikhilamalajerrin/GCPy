@@ -14,12 +14,12 @@ class _ElbClassicHours(BaseAwsPriceComponent):
 
     Name:          "Per Classic Load Balancer"
     Unit:          "hours"
-    Time unit:     hour   (framework will convert to monthly where needed)
+    Time unit:     hour
     Filters:
       - servicecode:   AWSELB
       - productFamily: Load Balancer
       - usagetype:     LoadBalancerUsage
-    Quantity: 1 per hour (no usage needed)
+    Quantity: 1 per hour
     """
     def __init__(self, resource: "Elb"):
         super().__init__(name="Per Classic Load Balancer", resource=resource, time_unit="hour")
@@ -35,9 +35,12 @@ class _ElbClassicHours(BaseAwsPriceComponent):
 class Elb(BaseAwsResource):
     """
     Python port of internal/providers/terraform/aws/elb::NewELB.
-
-    This models **Classic ELB** (aws_elb), not Application/Network Load Balancers.
+    Models Classic ELB (aws_elb).
     """
     def __init__(self, address: str, region: str, raw_values: Dict[str, Any]):
         super().__init__(address, region, raw_values)
         self._set_price_components([_ElbClassicHours(self)])
+
+
+AwsElb = Elb
+NewElb = Elb

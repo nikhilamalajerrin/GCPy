@@ -1,3 +1,4 @@
+# plancosts/providers/terraform/aws/docdb_cluster_instance.py
 from __future__ import annotations
 
 from decimal import Decimal
@@ -6,40 +7,56 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .base import BaseAwsResource, BaseAwsPriceComponent
 
 if TYPE_CHECKING:
-    # type-only; keep import graph clean
     from plancosts.schema.resource_data import ResourceData
 
 
 class DocdbClusterInstance(BaseAwsResource):
     """
-    Cost model for aws_docdb_cluster_instance (Python port of the Go version).
+    Cost model for aws_docdb_cluster_instance.
 
     Components:
-      - Database Instance (on_demand, hours) filtered by instanceType
-      - Storage (GB-months) usagetype=StorageUsage (on_demand)
-      - I/O (requests) usagetype=StorageIOUsage
-      - Backup Storage (GB-months) usagetype=BackupUsage
-      - CPU Credits (vCPU-hours) for db.t3.* (usagetype=CPUCredits:db.t3)
+      - Database Instance (on_demand, <instance_class>)
+      - Storage (GB-months)
+      - I/O (requests)
+      - Backup Storage (GB-months)
+      - CPU Credits (for db.t3.*)
     """
 
     SERVICE = "AmazonDocDB"
 
-    # NOTE: We don't call BaseAwsResource.__init__ here since unit tests provide a FakeRD.
-    # We just store minimal state needed by name()/price_components().
     def __init__(self, d: "ResourceData", u: Optional["ResourceData"] = None) -> None:
         self.d = d
         self.u = u
-        self.region: str = d.get("region", "") if hasattr(d, "get") else ""
-        self.instance_type: str = d.get("instance_class", "") if hasattr(d, "get") else ""
+
+        # --- region ---
+        try:
+            get = getattr(d, "Get", None)
+            if callable(get):
+                region_val = get("region")
+                self.region = getattr(region_val, "String", lambda: "")()
+            else:
+                self.region = str(d.get("region", ""))
+        except Exception:
+            self.region = ""
+
+        # --- instance class ---
+        try:
+            if callable(get):
+                ic_val = get("instance_class")
+                self.instance_type = getattr(ic_val, "String", lambda: "")()
+            else:
+                self.instance_type = str(d.get("instance_class", ""))
+        except Exception:
+            self.instance_type = ""
+
+        super().__init__(address=getattr(d, "Address", ""), region=self.region, raw_values={})
 
     def name(self) -> str:
         return getattr(self.d, "Address", "")
 
-    # ------------- public: build cost components -------------
     def price_components(self) -> List[BaseAwsPriceComponent]:
         pcs: List[BaseAwsPriceComponent] = []
 
-        # 1) On-demand instance hours (time unit=hour)
         pcs.append(
             self._pc(
                 name=f"Database Instance (on_demand, {self.instance_type})",
@@ -47,11 +64,10 @@ class DocdbClusterInstance(BaseAwsResource):
                 product_family="Database Instance",
                 attr_filters={"instanceType": self.instance_type},
                 purchase_option="on_demand",
-                fixed_qty=Decimal(1),  # 1 instance-hour per hour
+                fixed_qty=Decimal(1),
             )
         )
 
-        # 2) Storage (GB-months) -> time unit=month
         pcs.append(
             self._pc(
                 name="Storage",
@@ -62,7 +78,6 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
-        # 3) I/O (requests) -> time unit=month (requests priced per-request; quantity supplied by usage)
         pcs.append(
             self._pc(
                 name="I/O",
@@ -72,7 +87,6 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
-        # 4) Backup Storage (GB-months) -> time unit=month
         pcs.append(
             self._pc(
                 name="Backup Storage",
@@ -82,7 +96,6 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
-        # 5) CPU credits for db.t3.* -> time unit=hour
         if self.instance_type.startswith("db.t3."):
             pcs.append(
                 self._pc(
@@ -93,39 +106,33 @@ class DocdbClusterInstance(BaseAwsResource):
                 )
             )
 
+        self._set_price_components(pcs)
         return pcs
 
-    # ----------------- helpers -----------------
     def _pc(
         self,
         *,
         name: str,
-        time_unit: str,  # "hour" | "month"
+        time_unit: str,
         product_family: str,
         attr_filters: Optional[Dict[str, str]] = None,
         purchase_option: Optional[str] = None,
         fixed_qty: Optional[Decimal] = None,
     ) -> BaseAwsPriceComponent:
-        """
-        Create a BaseAwsPriceComponent wired for our base.py contract:
-        - constructor: (name, resource, time_unit)
-        - set product/price filter via setters
-        - quantity via SetQuantityMultiplierFunc
-        """
         pc = BaseAwsPriceComponent(name, self, time_unit)
 
-        # Attribute filters are a list of {"key":..., "value":...} or {"key":..., "valueRegex":...}
-        attribute_filters: List[Dict[str, Any]] = []
-        for k, v in (attr_filters or {}).items():
-            attribute_filters.append({"key": k, "value": v})
+        attribute_filters: List[Dict[str, Any]] = [
+            {"key": k, "value": v} for k, v in (attr_filters or {}).items()
+        ]
 
-        product_filter: Dict[str, Any] = {
+        product_filter = {
             "vendorName": "aws",
-            "region": (self.region or None),
+            "region": self.region or None,
             "service": self.SERVICE,
             "productFamily": product_family,
             "attributeFilters": attribute_filters or None,
         }
+
         pc.set_product_filter_override(product_filter)
 
         if purchase_option:
@@ -137,6 +144,5 @@ class DocdbClusterInstance(BaseAwsResource):
         return pc
 
 
-# Optional factory alias
 def NewDocdbClusterInstance(d: "ResourceData", u: Optional["ResourceData"] = None) -> DocdbClusterInstance:
     return DocdbClusterInstance(d, u)

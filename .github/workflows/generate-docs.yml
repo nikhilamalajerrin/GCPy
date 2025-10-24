@@ -1,0 +1,39 @@
+name: Generate Documentation
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: Generate docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          make deps
+
+      - name: Generate docs
+        run: make docs
+
+      - name: Commit generated docs
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add --force docs/generated || true
+          git diff --cached --quiet || git commit -m "chore(docs): auto-generate supported_resources.md"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
