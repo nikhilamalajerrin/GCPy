@@ -12,7 +12,7 @@ Support for the following is not currently included:
 | Terraform resource           | Notes |
 | ---                          | ---   |
 {% for key, value in resource_registry_map.items() -%}
-| `{{ key }}{% if value.get('Aliases') %} {% for alias in value['Aliases'] %}/ {{ alias }}{% endfor %}{% endif %}` | {% if value.get('Notes') %}{% for note in value['Notes'] %}{{ note }} {% endfor %}{% endif %}|
+| `{{ key }}` | {% if value.get('notes') %}{% for note in value['notes'] %}{{ note }} {% endfor %}{% endif %}|
 {% endfor %}
 
 ## The resource that isn't supported

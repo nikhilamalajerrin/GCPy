@@ -1,147 +1,254 @@
 # plancosts/providers/terraform/aws/resource_registry.py
 from __future__ import annotations
 
-from typing import Any, Dict
-from plancosts.schema.registry_item import RegistryItem
+from typing import Callable, Any, Dict
 
-# -------- aws_lb / aws_alb --------
+# -------- aws_lb / aws_alb (alias for aws_lb) --------
+AwsLbCtor = None
 try:
-    from .lb import Lb as _AwsLbCtor
+    from .lb import Lb as AwsLbCtor  # preferred
 except Exception:
     try:
-        from .aws_lb import Lb as _AwsLbCtor
+        from .aws_lb import Lb as AwsLbCtor
     except Exception:
-        _AwsLbCtor = None
+        try:
+            from .lb import AwsLb as AwsLbCtor
+        except Exception:
+            AwsLbCtor = None  # type: ignore[assignment]
 
 # -------- aws_autoscaling_group --------
+# Prefer the new Python port in autoscaling_group.py FIRST.
+AwsAsgCtor = None
 try:
-    from .autoscaling_group import NewAutoscalingGroup as _AwsAsgCtor
+    from .autoscaling_group import NewAutoscalingGroup as AwsAsgCtor
 except Exception:
     try:
-        from .autoscaling_group import AwsAutoscalingGroup as _AwsAsgCtor
+        from .autoscaling_group import AwsAutoscalingGroup as AwsAsgCtor
     except Exception:
-        _AwsAsgCtor = None
+        try:
+            from .ec2_autoscaling_group import NewAutoscalingGroup as AwsAsgCtor
+        except Exception:
+            try:
+                from .ec2_autoscaling_group import Ec2AutoscalingGroup as AwsAsgCtor
+            except Exception:
+                AwsAsgCtor = None  # type: ignore[assignment]
 
 # -------- aws_db_instance --------
+AwsDbInstanceCtor = None
 try:
-    from .db_instance import DbInstance as _AwsDbInstanceCtor
+    from .db_instance import DbInstance as AwsDbInstanceCtor
 except Exception:
     try:
-        from .aws_db_instance import DbInstance as _AwsDbInstanceCtor
+        from .aws_db_instance import DbInstance as AwsDbInstanceCtor
     except Exception:
-        _AwsDbInstanceCtor = None
-
-# -------- aws_docdb_cluster_instance --------
-try:
-    from .docdb_cluster_instance import DocdbClusterInstance as _DocdbClusterInstanceCtor
-except Exception:
-    _DocdbClusterInstanceCtor = None
+        AwsDbInstanceCtor = None  # type: ignore[assignment]
 
 # -------- aws_dynamodb_table --------
+AwsDynamoTableCtor = None
 try:
-    from .dynamodb_table import DynamoDbTable as _AwsDynamoTableCtor
+    from .dynamodb_table import DynamoDbTable as AwsDynamoTableCtor
 except Exception:
-    _AwsDynamoTableCtor = None
-
-# -------- aws_ebs_snapshot --------
-try:
-    from .ebs_snapshot import EbsSnapshot as _AwsEbsSnapshotCtor
-except Exception:
-    _AwsEbsSnapshotCtor = None
-
-# -------- aws_ebs_snapshot_copy --------
-try:
-    from .ebs_snapshot_copy import EbsSnapshotCopy as _AwsEbsSnapshotCopyCtor
-except Exception:
-    _AwsEbsSnapshotCopyCtor = None
+    try:
+        from .dynamodb_table import DynamoDBTable as AwsDynamoTableCtor
+    except Exception:
+        AwsDynamoTableCtor = None  # type: ignore[assignment]
 
 # -------- aws_ebs_volume --------
+AwsEbsVolumeCtor = None
 try:
-    from .ebs_volume import EbsVolume as _AwsEbsVolumeCtor
+    from .ebs_volume import EbsVolume as AwsEbsVolumeCtor
 except Exception:
-    _AwsEbsVolumeCtor = None
+    try:
+        from .aws_ebs_volume import EbsVolume as AwsEbsVolumeCtor
+    except Exception:
+        AwsEbsVolumeCtor = None  # type: ignore[assignment]
+
+# -------- aws_ebs_snapshot --------
+AwsEbsSnapshotCtor = None
+try:
+    from .ebs_snapshot import EbsSnapshot as AwsEbsSnapshotCtor
+except Exception:
+    try:
+        from .aws_ebs_snapshot import EbsSnapshot as AwsEbsSnapshotCtor
+    except Exception:
+        AwsEbsSnapshotCtor = None  # type: ignore[assignment]
+
+# -------- aws_ebs_snapshot_copy --------
+AwsEbsSnapshotCopyCtor = None
+try:
+    from .ebs_snapshot_copy import EbsSnapshotCopy as AwsEbsSnapshotCopyCtor
+except Exception:
+    try:
+        from .aws_ebs_snapshot_copy import EbsSnapshotCopy as AwsEbsSnapshotCopyCtor
+    except Exception:
+        AwsEbsSnapshotCopyCtor = None  # type: ignore[assignment]
 
 # -------- aws_ecs_service --------
+AwsEcsServiceCtor = None
 try:
-    from .ecs_service import AwsEcsService as _AwsEcsServiceCtor
+    from .ecs_service import AwsEcsService as AwsEcsServiceCtor
 except Exception:
     try:
-        from .ecs_service import EcsService as _AwsEcsServiceCtor
+        from .ecs_service import EcsService as AwsEcsServiceCtor
     except Exception:
-        _AwsEcsServiceCtor = None
+        AwsEcsServiceCtor = None  # type: ignore[assignment]
 
-# -------- aws_elb --------
+# -------- aws_elb (Classic) --------
+AwsElbCtor = None
 try:
-    from .elb import Elb as _AwsElbCtor
+    from .elb import Elb as AwsElbCtor
 except Exception:
-    _AwsElbCtor = None
-
-# -------- aws_elasticsearch_domain --------
-try:
-    from .elasticsearch_domain import ElasticsearchDomain as _AwsEsDomainCtor
-except Exception:
-    _AwsEsDomainCtor = None
+    try:
+        from .aws_elb import Elb as AwsElbCtor
+    except Exception:
+        AwsElbCtor = None  # type: ignore[assignment]
 
 # -------- aws_instance --------
+# IMPORTANT: Prefer the new Python port in instance.py FIRST so we get the
+# (address, region, raw_values, rd) signature that the parser uses.
+AwsInstanceCtor = None
 try:
-    from .instance import AwsInstance as _AwsInstanceCtor
+    from .instance import AwsInstance as AwsInstanceCtor  # preferred
 except Exception:
     try:
-        from .instance import Instance as _AwsInstanceCtor
+        from .instance import Instance as AwsInstanceCtor
     except Exception:
-        _AwsInstanceCtor = None
-
-# -------- aws_lambda_function --------
-try:
-    from .lambda_function import LambdaFunction as _AwsLambdaFunctionCtor
-except Exception:
-    _AwsLambdaFunctionCtor = None
+        try:
+            from .ec2_instance import Ec2Instance as AwsInstanceCtor
+        except Exception:
+            AwsInstanceCtor = None  # type: ignore[assignment]
 
 # -------- aws_nat_gateway --------
+AwsNatGatewayCtor = None
 try:
-    from .nat_gateway import NatGateway as _AwsNatGatewayCtor
+    from .aws_nat_gateway import NatGateway as AwsNatGatewayCtor
 except Exception:
-    _AwsNatGatewayCtor = None
+    try:
+        from .nat_gateway import NatGateway as AwsNatGatewayCtor
+    except Exception:
+        AwsNatGatewayCtor = None  # type: ignore[assignment]
 
 # -------- aws_rds_cluster_instance --------
+AwsRdsClusterInstanceCtor = None
 try:
-    from .rds_cluster_instance import RdsClusterInstance as _AwsRdsClusterInstanceCtor
+    from .rds_cluster_instance import RdsClusterInstance as AwsRdsClusterInstanceCtor
 except Exception:
-    _AwsRdsClusterInstanceCtor = None
+    try:
+        from .aws_rds_cluster_instance import RdsClusterInstance as AwsRdsClusterInstanceCtor
+    except Exception:
+        AwsRdsClusterInstanceCtor = None  # type: ignore[assignment]
+
+# -------- aws_docdb_cluster_instance --------
+DocdbClusterInstanceCtor = None
+try:
+    # preferred class name in our port
+    from .docdb_cluster_instance import DocdbClusterInstance as DocdbClusterInstanceCtor
+except Exception:
+    try:
+        # fallback if you named it AwsDocdbClusterInstance
+        from .docdb_cluster_instance import AwsDocdbClusterInstance as DocdbClusterInstanceCtor
+    except Exception:
+        DocdbClusterInstanceCtor = None  # type: ignore[assignment]
+
+# -------- aws_elasticsearch_domain --------
+AwsEsDomainCtor = None
+try:
+    from .elasticsearch_domain import ElasticsearchDomain as AwsEsDomainCtor
+except Exception:
+    try:
+        from .aws_elasticsearch_domain import ElasticsearchDomain as AwsEsDomainCtor
+    except Exception:
+        AwsEsDomainCtor = None  # type: ignore[assignment]
+
+# -------- aws_lambda_function --------
+AwsLambdaFunctionCtor = None
+try:
+    from .lambda_function import LambdaFunction as AwsLambdaFunctionCtor
+except Exception:
+    try:
+        from .aws_lambda_function import LambdaFunction as AwsLambdaFunctionCtor
+    except Exception:
+        AwsLambdaFunctionCtor = None  # type: ignore[assignment]
 
 
-# ---------------- Registry Items ----------------
-def _make(name: str, ctor: Any, *, aliases=None, notes=None) -> RegistryItem:
-    if ctor is None:
-        return None
-    return RegistryItem(name=name, rfunc=ctor, aliases=aliases or [], notes=notes or [])
+# -------------------- Public registry --------------------
 
+ResourceRegistry: Dict[str, Callable[..., Any]] = {}
 
-ResourceRegistry: Dict[str, RegistryItem] = {}
+# aws_lb + alias aws_alb
+if AwsLbCtor is not None:
+    ResourceRegistry["aws_lb"] = AwsLbCtor
+    ResourceRegistry["aws_alb"] = AwsLbCtor  # alias
+else:
+    raise ImportError("lb ctor not found (expected lb.Lb / aws_lb.Lb)")
 
-for item in [
-    _make("aws_autoscaling_group", _AwsAsgCtor),
-    _make("aws_db_instance", _AwsDbInstanceCtor),
-    _make("aws_docdb_cluster_instance", _DocdbClusterInstanceCtor),
-    _make("aws_dynamodb_table", _AwsDynamoTableCtor),
-    _make("aws_ebs_snapshot_copy", _AwsEbsSnapshotCopyCtor),
-    _make("aws_ebs_snapshot", _AwsEbsSnapshotCtor),
-    _make("aws_ebs_volume", _AwsEbsVolumeCtor),
-    _make("aws_ecs_service", _AwsEcsServiceCtor),
-    _make("aws_elasticsearch_domain", _AwsEsDomainCtor),
-    _make("aws_elb", _AwsElbCtor),
-    _make("aws_instance", _AwsInstanceCtor),
-    _make("aws_lambda_function", _AwsLambdaFunctionCtor),
-    _make("aws_lb", _AwsLbCtor, aliases=["aws_alb", "aws_nlb"]),
-    _make("aws_nat_gateway", _AwsNatGatewayCtor),
-    _make("aws_rds_cluster_instance", _AwsRdsClusterInstanceCtor),
-]:
-    if item:
-        ResourceRegistry[item.name] = item
-        # 🔁 Register aliases explicitly for Terraform parser lookup
-        for alias in item.aliases:
-            ResourceRegistry[alias] = item
+if AwsAsgCtor is not None:
+    ResourceRegistry["aws_autoscaling_group"] = AwsAsgCtor
+else:
+    raise ImportError("autoscaling group ctor not found (expected autoscaling_group / ec2_autoscaling_group)")
 
+if AwsDbInstanceCtor is not None:
+    ResourceRegistry["aws_db_instance"] = AwsDbInstanceCtor
+else:
+    raise ImportError("db instance ctor not found (expected db_instance)")
+
+if AwsDynamoTableCtor is not None:
+    ResourceRegistry["aws_dynamodb_table"] = AwsDynamoTableCtor
+else:
+    raise ImportError("dynamodb table ctor not found (expected dynamodb_table)")
+
+if AwsEbsSnapshotCtor is not None:
+    ResourceRegistry["aws_ebs_snapshot"] = AwsEbsSnapshotCtor
+else:
+    raise ImportError("ebs snapshot ctor not found (expected ebs_snapshot)")
+
+if AwsEbsSnapshotCopyCtor is not None:
+    ResourceRegistry["aws_ebs_snapshot_copy"] = AwsEbsSnapshotCopyCtor
+else:
+    raise ImportError("ebs snapshot copy ctor not found (expected ebs_snapshot_copy)")
+
+if AwsEbsVolumeCtor is not None:
+    ResourceRegistry["aws_ebs_volume"] = AwsEbsVolumeCtor
+else:
+    raise ImportError("ebs volume ctor not found (expected ebs_volume)")
+
+if AwsEcsServiceCtor is not None:
+    ResourceRegistry["aws_ecs_service"] = AwsEcsServiceCtor
+else:
+    raise ImportError("ecs service ctor not found (expected ecs_service)")
+
+if AwsElbCtor is not None:
+    ResourceRegistry["aws_elb"] = AwsElbCtor
+else:
+    raise ImportError("elb ctor not found (expected elb)")
+
+if AwsInstanceCtor is not None:
+    ResourceRegistry["aws_instance"] = AwsInstanceCtor
+else:
+    raise ImportError("instance ctor not found (expected instance/ec2_instance)")
+
+if AwsNatGatewayCtor is not None:
+    ResourceRegistry["aws_nat_gateway"] = AwsNatGatewayCtor
+else:
+    raise ImportError("nat gateway ctor not found (expected aws_nat_gateway/nat_gateway)")
+
+if AwsRdsClusterInstanceCtor is not None:
+    ResourceRegistry["aws_rds_cluster_instance"] = AwsRdsClusterInstanceCtor
+else:
+    raise ImportError("rds cluster instance ctor not found (expected rds_cluster_instance)")
+
+if DocdbClusterInstanceCtor is not None:
+    ResourceRegistry["aws_docdb_cluster_instance"] = DocdbClusterInstanceCtor
+else:
+    raise ImportError("docdb cluster instance ctor not found (expected docdb_cluster_instance)")
+
+if AwsEsDomainCtor is not None:
+    ResourceRegistry["aws_elasticsearch_domain"] = AwsEsDomainCtor
+else:
+    raise ImportError("elasticsearch domain ctor not found (expected elasticsearch_domain)")
+
+# Optional: include lambda if present
+if AwsLambdaFunctionCtor is not None:
+    ResourceRegistry["aws_lambda_function"] = AwsLambdaFunctionCtor
 
 __all__ = ["ResourceRegistry"]
-
