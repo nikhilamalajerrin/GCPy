@@ -1,6 +1,4 @@
-# plancosts/providers/terraform/aws/db_instance.py
 from __future__ import annotations
-
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 
@@ -38,41 +36,39 @@ def _deployment_option(raw: Dict[str, Any]) -> str:
 
 def _engine_to_database_engine(engine: str) -> Optional[str]:
     e = (engine or "").strip().lower()
-    if e == "postgres":
-        return "PostgreSQL"
-    if e == "mysql":
-        return "MySQL"
-    if e == "mariadb":
-        return "MariaDB"
-    if e in ("aurora", "aurora-mysql"):
-        return "Aurora MySQL"
-    if e == "aurora-postgresql":
-        return "Aurora PostgreSQL"
-    if e in ("oracle-se", "oracle-se1", "oracle-se2", "oracle-ee"):
-        return "Oracle"
-    if e in ("sqlserver-ex", "sqlserver-web", "sqlserver-se", "sqlserver-ee"):
-        return "SQL Server"
-    return None
+    return {
+        "postgres": "PostgreSQL",
+        "mysql": "MySQL",
+        "mariadb": "MariaDB",
+        "aurora": "Aurora MySQL",
+        "aurora-mysql": "Aurora MySQL",
+        "aurora-postgresql": "Aurora PostgreSQL",
+        "oracle-se": "Oracle",
+        "oracle-se1": "Oracle",
+        "oracle-se2": "Oracle",
+        "oracle-ee": "Oracle",
+        "sqlserver-ex": "SQL Server",
+        "sqlserver-web": "SQL Server",
+        "sqlserver-se": "SQL Server",
+        "sqlserver-ee": "SQL Server",
+    }.get(e)
 
 
 def _engine_to_database_edition(engine: str) -> Optional[str]:
     e = (engine or "").strip().lower()
-    if e in ("oracle-se", "sqlserver-se"):
-        return "Standard"
-    if e == "oracle-se1":
-        return "Standard One"
-    if e == "oracle-se2":
-        return "Standard Two"
-    if e in ("oracle-ee", "sqlserver-ee"):
-        return "Enterprise"
-    if e == "sqlserver-ex":
-        return "Express"
-    if e == "sqlserver-web":
-        return "Web"
-    return None
+    return {
+        "oracle-se": "Standard",
+        "sqlserver-se": "Standard",
+        "oracle-se1": "Standard One",
+        "oracle-se2": "Standard Two",
+        "oracle-ee": "Enterprise",
+        "sqlserver-ee": "Enterprise",
+        "sqlserver-ex": "Express",
+        "sqlserver-web": "Web",
+    }.get(e)
 
 
-def _license_model(engine: str, license_model: str | None) -> Optional[str]:
+def _license_model(engine: str, license_model: Optional[str]) -> Optional[str]:
     e = (engine or "").strip().lower()
     lm = (license_model or "").strip().lower()
 
@@ -83,15 +79,12 @@ def _license_model(engine: str, license_model: str | None) -> Optional[str]:
 
     if lm == "bring-your-own-license":
         return "Bring your own license"
-
     return implied
 
 
 def _volume_type(raw: Dict[str, Any]) -> str:
     storage_type = (raw.get("storage_type") or "").strip().lower()
-    iops_present = raw.get("iops", None) is not None
-
-    if iops_present:
+    if raw.get("iops") is not None:
         return "Provisioned IOPS"
     if storage_type == "standard":
         return "Magnetic"
@@ -109,9 +102,9 @@ class _RdsInstanceHours(BaseAwsPriceComponent):
         rv = _rv_of(resource)
         instance_type = str(rv.get("instance_class", "") or "")
         deployment = _deployment_option(rv)
-        db_engine = _engine_to_database_engine(str(rv.get("engine", "") or ""))
-        db_edition = _engine_to_database_edition(str(rv.get("engine", "") or ""))
-        license_model = _license_model(str(rv.get("engine", "") or ""), rv.get("license_model"))
+        db_engine = _engine_to_database_engine(rv.get("engine", ""))
+        db_edition = _engine_to_database_edition(rv.get("engine", ""))
+        license_model = _license_model(rv.get("engine", ""), rv.get("license_model"))
 
         self.default_filters = [
             Filter(key="servicecode", value="AmazonRDS"),
@@ -126,7 +119,8 @@ class _RdsInstanceHours(BaseAwsPriceComponent):
         if license_model:
             self.default_filters.append(Filter(key="licenseModel", value=license_model))
 
-        self.set_price_filter({"purchaseOption": "on_demand", "unit": "Hrs"})
+        # Go: PriceFilter{PurchaseOption: "on_demand"}
+        self.set_price_filter({"purchaseOption": "on_demand"})
         self.SetQuantityMultiplierFunc(lambda _r: Decimal(1))
         self.unit_ = "hours"
 
@@ -176,15 +170,11 @@ class DbInstance(BaseAwsResource):
         super().__init__(address, region, raw_values)
 
         rv = raw_values or {}
-        components = [
-            _RdsInstanceHours(self),
-            _RdsStorage(self),
-        ]
-
+        pcs = [_RdsInstanceHours(self), _RdsStorage(self)]
         if _volume_type(rv) == "Provisioned IOPS":
-            components.append(_RdsStorageIops(self))
+            pcs.append(_RdsStorageIops(self))
 
-        self._set_price_components(components)
+        self._set_price_components(pcs)
 
 
 RdsInstance = DbInstance

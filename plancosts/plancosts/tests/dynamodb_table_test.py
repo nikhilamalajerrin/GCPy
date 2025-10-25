@@ -19,12 +19,14 @@ def _addr(res) -> str:
         return res.Address()
     return getattr(res, "address", "<resource>")
 
+
 def _subresources(res) -> List[Any]:
     if hasattr(res, "sub_resources") and callable(res.sub_resources):
         return list(res.sub_resources() or [])
     if hasattr(res, "SubResources") and callable(res.SubResources):
         return list(res.SubResources() or [])
     return list(getattr(res, "sub_resources", []) or [])
+
 
 def _pcs(res) -> List[Any]:
     if hasattr(res, "price_components") and callable(res.price_components):
@@ -33,6 +35,7 @@ def _pcs(res) -> List[Any]:
         return list(res.PriceComponents() or [])
     return list(getattr(res, "cost_components", []) or [])
 
+
 def _pc_name(pc) -> str:
     if hasattr(pc, "name") and callable(pc.name):
         return pc.name()
@@ -40,15 +43,18 @@ def _pc_name(pc) -> str:
         return pc.Name()
     return getattr(pc, "name", "<component>")
 
+
 def _pc_price(pc) -> Decimal:
     if hasattr(pc, "Price") and callable(pc.Price):
         return Decimal(str(pc.Price()))
     return Decimal(str(getattr(pc, "price", "0")))
 
+
 def _pc_hourly(pcc) -> Decimal:
     if hasattr(pcc, "HourlyCost") and callable(pcc.HourlyCost):
         return Decimal(str(pcc.HourlyCost()))
     return Decimal(str(getattr(pcc, "hourly_cost", "0")))
+
 
 def _pc_pricehash(pcc) -> Optional[str]:
     if hasattr(pcc, "PriceHash") and callable(pcc.PriceHash):
@@ -65,12 +71,8 @@ def _pc_pricehash(pcc) -> Optional[str]:
             return vv() if callable(vv) else vv
     return None
 
+
 def _wrap_pccs(res) -> List[Any]:
-    """
-    Normalize to 'price component costs' containers.
-    If your pricing layer already exposes .price_component_costs, use it.
-    Otherwise build a thin wrapper so _pc_hourly/_pc_pricehash keep working.
-    """
     pccs = getattr(res, "price_component_costs", None)
     if pccs:
         return list(pccs)
@@ -92,11 +94,13 @@ def _wrap_pccs(res) -> List[Any]:
         out.append(_PCC())
     return out
 
+
 def _find_resource(resources: List[Any], want_suffix: str) -> Optional[Any]:
     for r in resources:
         if _addr(r).endswith(want_suffix):
             return r
     return None
+
 
 def _find_pcc(res_or_pcc_list: Any, name: str):
     pccs = res_or_pcc_list if isinstance(res_or_pcc_list, list) else _wrap_pccs(res_or_pcc_list)
@@ -106,11 +110,108 @@ def _find_pcc(res_or_pcc_list: Any, name: str):
             return pcc
     return None
 
+
 def _runner():
     return GraphQLQueryRunner("http://127.0.0.1:4000/graphql")
 
 
-# ---------- the test (parity adapted to your dataset) ----------
+# ---------- Test: PAY_PER_REQUEST (On-Demand) ----------
+
+@pytest.mark.integration
+def test_dynamodb_table_on_demand_with_replicas():
+    plan: Dict[str, Any] = {
+        "format_version": "0.1",
+        "terraform_version": "0.14.0",
+        "configuration": {
+            "provider_config": {"aws": {"expressions": {"region": {"constant_value": "us-east-1"}}}},
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_dynamodb_table.my_dynamodb_table",
+                        "type": "aws_dynamodb_table",
+                        "expressions": {
+                            "name": {"constant_value": "GameScores"},
+                            "billing_mode": {"constant_value": "PAY_PER_REQUEST"},
+                            "hash_key": {"constant_value": "UserId"},
+                            "range_key": {"constant_value": "GameTitle"},
+                            "attribute": [
+                                {"name": {"constant_value": "UserId"}, "type": {"constant_value": "S"}},
+                                {"name": {"constant_value": "GameTitle"}, "type": {"constant_value": "S"}},
+                            ],
+                            "replica": [
+                                {"region_name": {"constant_value": "us-east-2"}},
+                                {"region_name": {"constant_value": "us-west-1"}},
+                            ],
+                        },
+                    },
+                ]
+            },
+        },
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_dynamodb_table.my_dynamodb_table",
+                        "type": "aws_dynamodb_table",
+                        "values": {
+                            "name": "GameScores",
+                            "billing_mode": "PAY_PER_REQUEST",
+                            "hash_key": "UserId",
+                            "range_key": "GameTitle",
+                            "attribute": [
+                                {"name": "UserId", "type": "S"},
+                                {"name": "GameTitle", "type": "S"},
+                            ],
+                            "replica": [
+                                {"region_name": "us-east-2"},
+                                {"region_name": "us-west-1"},
+                            ],
+                            "_usage": {
+                                "monthly_write_request_units": 3000000,
+                                "monthly_read_request_units": 8000000,
+                                "monthly_gb_data_storage": 230,
+                                "monthly_gb_continuous_backup_storage": 2300,
+                                "monthly_gb_on_demand_backup_storage": 460,
+                                "monthly_gb_restore": 230,
+                                "monthly_streams_read_request_units": 2000000,
+                            },
+                        },
+                    },
+                ]
+            }
+        },
+    }
+
+    resources = parse_plan_json(plan)
+    get_cost_breakdowns(_runner(), resources)
+
+    tbl = _find_resource(resources, "aws_dynamodb_table.my_dynamodb_table")
+    assert tbl is not None, "dynamodb table not found"
+
+    checks = [
+        ("Write request unit (WRU)", "075760076246f7bf5a2b46546e49cb31-418b228ac00af0f32e1843fecbc3d141", 3000000),
+        ("Read request unit (RRU)", "641aa07510d472901906f3e97cee96c4-668942c2f9f9b475e74de593d4c32257", 8000000),
+        ("Data storage", "a9781acb5ee117e6c50ab836dd7285b5-ee3dd7e4624338037ca6fea0933a662f", 230),
+        ("Continuous backup (PITR) storage", "b4ed90c18b808ffff191ffbc16090c8e-ee3dd7e4624338037ca6fea0933a662f", 2300),
+        ("On-demand backup storage", "0e228653f3f9c663398e91a605c911bd-8753f776c1e737f1a5548191571abc76", 460),
+        ("Restore data size", "38fc5fdbec6f4ef5e3bdf6967dbe1cb2-b1ae3861dc57e2db217fa83a7420374f", 230),
+        ("Streams read request unit (sRRU)", "dd063861f705295d00a801050a700b3e-4a9dfd3965ffcbab75845ead7a27fd47", 2000000),
+    ]
+
+    for name, hash_, qty in checks:
+        pcc = _find_pcc(tbl, name)
+        assert _pc_pricehash(pcc) == hash_
+        assert _pc_hourly(pcc) == _pc_price(getattr(pcc, "price_component", pcc)) * Decimal(qty)
+
+    # replicas
+    reps = _subresources(tbl)
+    east2 = next((r for r in reps if _addr(r).endswith("us-east-2")), None)
+    assert _pc_pricehash(_find_pcc(east2, "Replicated write request unit (rWRU)")) == "bd1c30b527edcc061037142f79c06955-cf867fc796b8147fa126205baed2922c"
+    usw1 = next((r for r in reps if _addr(r).endswith("us-west-1")), None)
+    assert _pc_pricehash(_find_pcc(usw1, "Replicated write request unit (rWRU)")) == "67f1a3e0472747acf74cd5e925422fbb-cf867fc796b8147fa126205baed2922c"
+
+
+# ---------- Test: PROVISIONED ----------
 
 @pytest.mark.integration
 def test_dynamodb_table_provisioned_with_replicas():
@@ -118,9 +219,7 @@ def test_dynamodb_table_provisioned_with_replicas():
         "format_version": "0.1",
         "terraform_version": "0.14.0",
         "configuration": {
-            "provider_config": {
-                "aws": {"expressions": {"region": {"constant_value": "us-east-1"}}}
-            },
+            "provider_config": {"aws": {"expressions": {"region": {"constant_value": "us-east-1"}}}},
             "root_module": {
                 "resources": [
                     {
@@ -174,74 +273,21 @@ def test_dynamodb_table_provisioned_with_replicas():
         },
     }
 
-    # Parse the plan and see what we get
     resources = parse_plan_json(plan)
-    
-    # DEBUG: Print information about what was parsed
-    print(f"\nDEBUG: Number of resources parsed: {len(resources)}")
-    print(f"DEBUG: Type of resources: {type(resources)}")
-    
-    if resources:
-        for i, res in enumerate(resources):
-            print(f"\nDEBUG: Resource {i}:")
-            print(f"  Type: {type(res)}")
-            print(f"  Address: {_addr(res)}")
-            print(f"  Has 'address' attr: {hasattr(res, 'address')}")
-            print(f"  Dir: {[attr for attr in dir(res) if not attr.startswith('_')][:10]}")  # First 10 attrs
-            
-            # Try to get more details about the resource
-            if hasattr(res, '__dict__'):
-                print(f"  __dict__ keys: {list(res.__dict__.keys())[:10]}")  # First 10 keys
-    else:
-        print("DEBUG: Resources list is empty!")
-    
-    # Also try to see if parse_plan_json is expecting different input structure
-    # Try passing just the planned_values section
-    print("\n--- Trying with just planned_values ---")
-    resources2 = parse_plan_json(plan["planned_values"])
-    print(f"DEBUG: Resources from planned_values: {len(resources2) if resources2 else 0}")
-    
-    # Continue with the original test to see where it fails
-    # This prices in-place; we don't need the return object.
     get_cost_breakdowns(_runner(), resources)
-    
-    # Find the table resource directly (no breakdown wrapper)
     tbl = _find_resource(resources, "aws_dynamodb_table.dynamodb-table")
     assert tbl is not None, "dynamodb table resource not found"
 
-    # ---- Top-level components: WCU/RCU ----
     wcu = _find_pcc(tbl, "Write capacity unit (WCU)")
-    assert wcu is not None, "missing WCU component"
-    price_wcu = _pc_price(getattr(wcu, "price_component", wcu))
-    hourly_wcu = _pc_hourly(wcu)
-    assert hourly_wcu == price_wcu * Decimal(20), f"WCU hourly mismatch: got {hourly_wcu}, want {price_wcu} * 20"
+    assert _pc_pricehash(wcu) == "b90795c897109784ce65409754460c41-8931e75640eb28f75b8eeb7989b3629d"
+    assert _pc_hourly(wcu) == _pc_price(getattr(wcu, "price_component", wcu)) * Decimal(20)
 
     rcu = _find_pcc(tbl, "Read capacity unit (RCU)")
-    assert rcu is not None, "missing RCU component"
-    price_rcu = _pc_price(getattr(rcu, "price_component", rcu))
-    hourly_rcu = _pc_hourly(rcu)
-    assert hourly_rcu == price_rcu * Decimal(30), f"RCU hourly mismatch: got {hourly_rcu}, want {price_rcu} * 30"
+    assert _pc_pricehash(rcu) == "30812d4142a0a73eb1efbd902581679f-bd107312a4bed8ba719b7dc8dcfdaf95"
+    assert _pc_hourly(rcu) == _pc_price(getattr(rcu, "price_component", rcu)) * Decimal(30)
 
-    # ---- Replicas (sub-resources by region) ----
     reps = _subresources(tbl)
-
-    # us-east-2
     east2 = next((r for r in reps if _addr(r).endswith("us-east-2")), None)
-    assert east2 is not None, "replica us-east-2 not found"
-    east2_rwcu = _find_pcc(east2, "Replicated write capacity unit (rWCU)")
-    assert east2_rwcu is not None, "us-east-2 rWCU missing"
-    # Known price hash from your dataset
-    assert _pc_pricehash(east2_rwcu) == "95e8dec74ece19d8d6b9c3ff60ef881b-af782957bf62d705bf1e97f981caeab1"
-    price_e2 = _pc_price(getattr(east2_rwcu, "price_component", east2_rwcu))
-    hourly_e2 = _pc_hourly(east2_rwcu)
-    assert hourly_e2 == price_e2 * Decimal(20)
-
-    # us-west-1
+    assert _pc_pricehash(_find_pcc(east2, "Replicated write capacity unit (rWCU)")) == "95e8dec74ece19d8d6b9c3ff60ef881b-af782957bf62d705bf1e97f981caeab1"
     usw1 = next((r for r in reps if _addr(r).endswith("us-west-1")), None)
-    assert usw1 is not None, "replica us-west-1 not found"
-    usw1_rwcu = _find_pcc(usw1, "Replicated write capacity unit (rWCU)")
-    assert usw1_rwcu is not None, "us-west-1 rWCU missing"
-    assert _pc_pricehash(usw1_rwcu) == "f472a25828ce71ef30b1aa898b7349ac-af782957bf62d705bf1e97f981caeab1"
-    price_w1 = _pc_price(getattr(usw1_rwcu, "price_component", usw1_rwcu))
-    hourly_w1 = _pc_hourly(usw1_rwcu)
-    assert hourly_w1 == price_w1 * Decimal(20)
+    assert _pc_pricehash(_find_pcc(usw1, "Replicated write capacity unit (rWCU)")) == "f472a25828ce71ef30b1aa898b7349ac-af782957bf62d705bf1e97f981caeab1"

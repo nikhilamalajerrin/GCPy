@@ -1,13 +1,9 @@
 from __future__ import annotations
-
 import pytest
-
-from plancosts.providers.terraform.aws.docdb_cluster_instance import (
-    DocdbClusterInstance,
-)
+from plancosts.providers.terraform.aws.docdb_cluster_instance import DocdbClusterInstance
 
 
-# Minimal fake ResourceData for unit tests
+# ---------------- Fake Terraform ResourceData ----------------
 class _FakeRD:
     def __init__(self, address: str, values: dict[str, str]):
         self.Address = address
@@ -17,8 +13,8 @@ class _FakeRD:
         return self._values.get(key, default)
 
 
+# ---------------- Helper utilities ----------------
 def _comp_name(c) -> str:
-    # Support either method or attribute across components
     n = getattr(c, "name", None)
     return n() if callable(n) else (n if isinstance(n, str) else "")
 
@@ -31,7 +27,6 @@ def _component_by_name(components, name: str):
 
 
 def _pf(c) -> dict:
-    # BaseAwsPriceComponent exposes product_filter() method
     pf = c.product_filter() if hasattr(c, "product_filter") else {}
     assert isinstance(pf, dict)
     return pf
@@ -44,6 +39,7 @@ def _purch_opt(c) -> str | None:
     return None
 
 
+# ---------------- Tests ----------------
 @pytest.mark.parametrize(
     "instance_class, expect_cpu_credits",
     [
@@ -54,17 +50,13 @@ def _purch_opt(c) -> str | None:
 def test_docdb_cluster_instance_components(instance_class: str, expect_cpu_credits: bool):
     rd = _FakeRD(
         "aws_docdb_cluster_instance.db",
-        {
-            "region": "us-east-1",
-            "instance_class": instance_class,
-        },
+        {"region": "us-east-1", "instance_class": instance_class},
     )
-
     res = DocdbClusterInstance(rd, None)
     pcs = res.price_components()
 
-    # 1) Database Instance (on_demand, <instance_class>)
-    inst = _component_by_name(pcs, f"Database Instance (on_demand, {instance_class})")
+    # 1) Database instance (on-demand, <instance_class>)
+    inst = _component_by_name(pcs, f"Database instance (on-demand, {instance_class})")
     pf = _pf(inst)
     assert pf["service"] == "AmazonDocDB"
     assert pf["productFamily"] == "Database Instance"
@@ -87,19 +79,19 @@ def test_docdb_cluster_instance_components(instance_class: str, expect_cpu_credi
     attrs = pf.get("attributeFilters") or []
     assert any(a.get("key") == "usagetype" and a.get("value") == "StorageIOUsage" for a in attrs)
 
-    # 4) Backup Storage
-    bk = _component_by_name(pcs, "Backup Storage")
+    # 4) Backup storage
+    bk = _component_by_name(pcs, "Backup storage")
     pf = _pf(bk)
     assert pf["productFamily"] == "Storage Snapshot"
     attrs = pf.get("attributeFilters") or []
     assert any(a.get("key") == "usagetype" and a.get("value") == "BackupUsage" for a in attrs)
 
-    # 5) CPU Credits only for db.t3.*
+    # 5) CPU credits only for db.t3.*
     names = [_comp_name(c) for c in pcs]
-    has_cpu = "CPU Credits" in names
+    has_cpu = "CPU credits" in names
     assert has_cpu == expect_cpu_credits
     if expect_cpu_credits:
-        cpu = _component_by_name(pcs, "CPU Credits")
+        cpu = _component_by_name(pcs, "CPU credits")
         pf = _pf(cpu)
         assert pf["productFamily"] == "CPU Credits"
         attrs = pf.get("attributeFilters") or []

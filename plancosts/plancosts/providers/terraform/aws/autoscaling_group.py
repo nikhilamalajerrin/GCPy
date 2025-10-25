@@ -16,23 +16,36 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 class _ASGComputeHours(BaseAwsPriceComponent):
+    """
+    Matches Infracost's computeCostComponents() naming and filter logic.
+    Generates price components like:
+      - "Compute (on-demand, t3.small)"
+      - "Compute (spot, t3.large)"
+    """
+
     def __init__(self, resource: "BaseAwsResource", instance_type: str, purchase_option: str, hourly_qty: Decimal):
         opt = (purchase_option or "").strip().lower()
 
         if opt in ("on_demand", "on-demand", "ondemand", "on demand", ""):
             opt_label = "on-demand"
+            term_filter = "OnDemand"
             is_spot = False
         elif opt == "spot":
             opt_label = "spot"
+            term_filter = "Spot"
             is_spot = True
         else:
             opt_label = "on-demand"
+            term_filter = "OnDemand"
             is_spot = False
 
+        # --- crucial naming fix ---
+        # Go version: fmt.Sprintf("Compute (%s, %s)", opt_label, instanceType)
         label = f"Compute ({opt_label}, {instance_type})" if instance_type else f"Compute ({opt_label})"
+
         super().__init__(name=label, resource=resource, time_unit="hour")
 
-        # Product-level filters common to both on-demand and spot
+        # --- filters exactly matching Infracost ---
         self.default_filters = [
             Filter(key="servicecode", value="AmazonEC2"),
             Filter(key="productFamily", value="Compute Instance"),
@@ -41,23 +54,21 @@ class _ASGComputeHours(BaseAwsPriceComponent):
             Filter(key="tenancy", value="Shared"),
         ]
 
-        # capacitystatus only for On-Demand (Spot SKUs typically don't have it)
         if not is_spot:
             self.default_filters.append(Filter(key="capacitystatus", value="Used"))
 
-        # (Optional) Some catalogs expose marketoption at the product level; harmless to include.
+        # Add marketoption filter just like Go logic permits
         self.default_filters.append(Filter(key="marketoption", value="Spot" if is_spot else "OnDemand"))
 
-        # Map instance type
+        # Instance type mapping
         self.value_mappings = [ValueMapping(from_key="instance_type", to_key="instanceType")]
 
-        # >>> Crucial fix: ensure price lookup matches the correct purchase term <<<
-        # Tests expect Spot components to yield a non-empty priceHash; without this, products match
-        # but no prices are found (price=0, empty hash).
-        self.set_price_filter({"term": "Spot" if is_spot else "OnDemand"})
+        # Ensure term filter controls Spot vs OnDemand price lookups
+        self.set_price_filter({"term": term_filter})
 
-        # Keep qty = 1; scaling is applied by _ScaledPriceComponent
+        # Quantity fixed at 1; scaling happens via _ScaledPriceComponent
         self.SetQuantityMultiplierFunc(lambda _r: Decimal(1))
+
 
 
 

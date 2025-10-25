@@ -1,6 +1,5 @@
 # plancosts/providers/terraform/aws/docdb_cluster_instance.py
 from __future__ import annotations
-
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -15,11 +14,11 @@ class DocdbClusterInstance(BaseAwsResource):
     Cost model for aws_docdb_cluster_instance.
 
     Components:
-      - Database Instance (on_demand, <instance_class>)
+      - Database instance (on-demand, <instance_class>)
       - Storage (GB-months)
       - I/O (requests)
-      - Backup Storage (GB-months)
-      - CPU Credits (for db.t3.*)
+      - Backup storage (GB-months)
+      - CPU credits (for db.t3.*)
     """
 
     SERVICE = "AmazonDocDB"
@@ -32,8 +31,7 @@ class DocdbClusterInstance(BaseAwsResource):
         try:
             get = getattr(d, "Get", None)
             if callable(get):
-                region_val = get("region")
-                self.region = getattr(region_val, "String", lambda: "")()
+                self.region = get("region").String()
             else:
                 self.region = str(d.get("region", ""))
         except Exception:
@@ -42,8 +40,7 @@ class DocdbClusterInstance(BaseAwsResource):
         # --- instance class ---
         try:
             if callable(get):
-                ic_val = get("instance_class")
-                self.instance_type = getattr(ic_val, "String", lambda: "")()
+                self.instance_type = get("instance_class").String()
             else:
                 self.instance_type = str(d.get("instance_class", ""))
         except Exception:
@@ -54,12 +51,16 @@ class DocdbClusterInstance(BaseAwsResource):
     def name(self) -> str:
         return getattr(self.d, "Address", "")
 
+    # ------------------------
+    # Price components builder
+    # ------------------------
     def price_components(self) -> List[BaseAwsPriceComponent]:
         pcs: List[BaseAwsPriceComponent] = []
 
+        # Database instance
         pcs.append(
             self._pc(
-                name=f"Database Instance (on_demand, {self.instance_type})",
+                name=f"Database instance (on-demand, {self.instance_type})",
                 time_unit="hour",
                 product_family="Database Instance",
                 attr_filters={"instanceType": self.instance_type},
@@ -68,6 +69,7 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
+        # Storage
         pcs.append(
             self._pc(
                 name="Storage",
@@ -78,6 +80,7 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
+        # I/O
         pcs.append(
             self._pc(
                 name="I/O",
@@ -87,19 +90,21 @@ class DocdbClusterInstance(BaseAwsResource):
             )
         )
 
+        # Backup storage
         pcs.append(
             self._pc(
-                name="Backup Storage",
+                name="Backup storage",
                 time_unit="month",
                 product_family="Storage Snapshot",
                 attr_filters={"usagetype": "BackupUsage"},
             )
         )
 
+        # CPU credits (for db.t3.*)
         if self.instance_type.startswith("db.t3."):
             pcs.append(
                 self._pc(
-                    name="CPU Credits",
+                    name="CPU credits",
                     time_unit="hour",
                     product_family="CPU Credits",
                     attr_filters={"usagetype": "CPUCredits:db.t3"},
@@ -109,6 +114,9 @@ class DocdbClusterInstance(BaseAwsResource):
         self._set_price_components(pcs)
         return pcs
 
+    # ------------------------
+    # Helper
+    # ------------------------
     def _pc(
         self,
         *,
